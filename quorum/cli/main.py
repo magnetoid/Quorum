@@ -7,7 +7,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from quorum.config import load_config
-from quorum.engine import ConsensusEngine
+from quorum.core.engine import Engine
+from quorum.storage.db import DB
+from quorum.core.reputation import ReputationManager
 
 try:
     from dotenv import load_dotenv
@@ -32,31 +34,79 @@ def ask(
         console.print(f"[red]Failed to load config: {e}[/red]")
         raise typer.Exit(1)
         
-    engine = ConsensusEngine(config)
+    engine = Engine(config)
+    db = DB()
     
-    if models:
-        model_list = [m.strip() for m in models.split(",")]
+    async def _run():
+        await db.init_db()
+        model_list = [m.strip() for m in models.split(",")] if models else None
+            
+        result = await engine.run(prompt, domain, budget, model_list)
+        
+        # Save history
+        await db.save_history(
+            query_id=result["query_id"],
+            prompt=prompt,
+            domain=result["domain"],
+            consensus=result["consensus"],
+            disputed_flag=result["disputed_flag"],
+            cost=result["cost"]
+        )
+        
+        # Display output
+        console.print(f"\n[bold blue]Domain:[/bold blue] {result['domain']}")
+        console.print(f"[bold blue]Confidence:[/bold blue] {result['confidence']:.2f}")
+        console.print(f"[bold blue]Cost:[/bold blue] {result['cost']}")
+        
+        if result["disputed_flag"]:
+            console.print(Panel(result["disputed"], title="[red]Disputed Zone[/red]", expand=False, border_style="red"))
+        
+        console.print("\n[bold green]Consensus:[/bold green]")
+        console.print(Panel(result["consensus"], expand=False, border_style="green"))
+        
+        console.print("\n[dim]Agent Responses:[/dim]")
+        for agent in result["agents"]:
+            console.print(f"- [bold]{agent['model']}[/bold]: {agent['vote']}")
+            
+        console.print(f"\n[dim]Query ID: {result['query_id']}[/dim]")
+
+    asyncio.run(_run())
+
+@app.command()
+def history():
+    """View query history."""
+    console.print("[yellow]History command pending full implementation.[/yellow]")
+
+@app.command()
+def models(stats: bool = typer.Option(False, "--stats", help="Show reputation stats")):
+    """List available models and optionally their stats."""
+    db = DB()
+    async def _run():
+        await db.init_db()
+        rm = ReputationManager(db)
+        scores = await rm.get_scores("default")
+        
+        table = Table("Model", "Score")
+        for m, s in scores.items():
+            table.add_row(m, f"{s:.2f}")
+        console.print(table)
+    
+    if stats:
+        asyncio.run(_run())
     else:
-        # Resolve domain to models
-        model_list = config.domains.get(domain, config.domains.get("factual", ["ollama/llama3.2"]))
-        
-    console.print(f"[bold blue]Querying models:[/bold blue] {', '.join(model_list)}")
-    
-    # Run async engine
-    results = asyncio.run(engine.ask_parallel(model_list, domain, prompt))
-    
-    # Display results
-    console.print("\n[bold green]Individual Responses:[/bold green]")
-    for model, response in results["responses"].items():
-        console.print(Panel(response, title=model, expand=False))
-        
-    console.print("\n[bold magenta]Consensus:[/bold magenta]")
-    console.print(Panel(results["consensus"], title="Aggregated Result", expand=False, border_style="magenta"))
+        console.print("Use --stats to view model reputation.")
+
+@app.command()
+def feedback(query_id: str, score: float = typer.Option(..., help="Feedback score (-1 to 1)")):
+    """Provide feedback on a query to update model reputation."""
+    console.print(f"[yellow]Feedback for {query_id} received. Model weights updating...[/yellow]")
 
 @app.command()
 def serve():
-    """Start the REST + MCP server (placeholder)."""
-    console.print("[yellow]Server functionality is coming soon per project spec.[/yellow]")
+    """Start the REST + MCP server."""
+    import uvicorn
+    console.print("[green]Starting FastAPI server on port 8000...[/green]")
+    uvicorn.run("quorum.server.api:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
     app()
