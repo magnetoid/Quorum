@@ -1,8 +1,8 @@
 from typing import List, Dict, Any, Tuple
-from collections import Counter
+from collections import defaultdict
 
 class VotingEngine:
-    def aggregate(self, responses: Dict[str, str], domain: str) -> Dict[str, Any]:
+    def aggregate(self, responses: Dict[str, str], domain: str, reputation_weights: Dict[str, float] = None) -> Dict[str, Any]:
         """
         Aggregate responses, calculate confidence, detect disputes.
         Returns dict matching consensus output schema.
@@ -16,13 +16,21 @@ class VotingEngine:
                 "agents": []
             }
 
+        reputation_weights = reputation_weights or {}
         agents = []
         answers = []
+        vote_scores = defaultdict(float)
         
         for model, response in responses.items():
             # In a real implementation, we would extract the core claim or vote
             # Here we just use the raw response or first sentence as a proxy
             vote = response.split(".")[0] if response else ""
+            
+            weight = reputation_weights.get(model, 1.0)
+            # Ensure base weight of 1.0, plus any reputation bonuses/penalties
+            # Normalizing negative scores if any (for safety)
+            weight = max(0.1, weight)
+            
             agents.append({
                 "model": model,
                 "response": response,
@@ -30,6 +38,7 @@ class VotingEngine:
             })
             if not response.startswith("Error"):
                 answers.append(response)
+                vote_scores[response] += weight
 
         if not answers:
             return {
@@ -40,19 +49,20 @@ class VotingEngine:
                 "agents": agents
             }
 
-        # Simple exact match consensus for demonstration
-        # In reality, this should use an LLM to evaluate semantic similarity
-        counter = Counter(answers)
-        most_common, count = counter.most_common(1)[0]
+        # Weighted exact match consensus
+        total_weight = sum(vote_scores.values())
+        most_common_response = max(vote_scores.items(), key=lambda x: x[1])[0]
+        max_score = vote_scores[most_common_response]
         
-        confidence = count / len(answers)
+        confidence = max_score / total_weight if total_weight > 0 else 0.0
         disputed_flag = confidence < 0.66
         
         if disputed_flag:
             consensus = "Models disagreed."
-            disputed = "Disputed zone: " + " | ".join(set(answers[:3]))
+            unique_answers = list(set(answers))
+            disputed = "Disputed zone: " + " | ".join(unique_answers[:3])
         else:
-            consensus = most_common
+            consensus = most_common_response
             disputed = ""
 
         return {

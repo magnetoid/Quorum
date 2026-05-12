@@ -1,14 +1,16 @@
 import httpx
 import os
-from .base import BaseAdapter
+from .base import BaseAdapter, AdapterResponse
+from quorum.config import AppConfig
 
 class AnthropicAdapter(BaseAdapter):
-    def __init__(self):
+    def __init__(self, config: AppConfig):
+        self.config = config
         self.api_key = os.getenv("ANTHROPIC_API_KEY")
 
-    async def generate(self, model: str, system_prompt: str, prompt: str) -> str:
+    async def generate(self, model: str, system_prompt: str, prompt: str) -> AdapterResponse:
         if not self.api_key:
-            return "Error: ANTHROPIC_API_KEY not set"
+            return AdapterResponse(content="", error="Error: ANTHROPIC_API_KEY not set")
         
         # map shorthand to full model names
         model_map = {
@@ -38,10 +40,22 @@ class AnthropicAdapter(BaseAdapter):
                     timeout=60.0
                 )
                 response.raise_for_status()
-                return response.json().get("content", [{}])[0].get("text", "").strip()
-            except Exception as e:
-                return f"Error from Anthropic ({model}): {str(e)}"
+                data = response.json()
+                content = data.get("content", [{}])[0].get("text", "").strip()
+                usage = data.get("usage", {})
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                
+                pricing = self.config.pricing.get(model)
+                cost = 0.0
+                if pricing:
+                    cost = (input_tokens * pricing.input + output_tokens * pricing.output) / 1000.0
 
-    def get_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
-        # Simplified cost mapping, could be dynamic from config
-        return (input_tokens * 0.003 + output_tokens * 0.015) / 1000
+                return AdapterResponse(
+                    content=content,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost=cost
+                )
+            except Exception as e:
+                return AdapterResponse(content="", error=f"Error from Anthropic ({model}): {str(e)}")

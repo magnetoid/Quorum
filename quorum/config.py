@@ -1,7 +1,12 @@
+import os
 import yaml
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Dict, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables centrally
+load_dotenv()
 
 class TierConfig(BaseModel):
     models: List[str]

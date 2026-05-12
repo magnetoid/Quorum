@@ -7,8 +7,8 @@ from quorum.storage.db import DB
 
 app = FastAPI(title="Quorum API")
 config = load_config()
-engine = Engine(config)
 db = DB()
+engine = Engine(config, db)
 
 class AskRequest(BaseModel):
     prompt: str

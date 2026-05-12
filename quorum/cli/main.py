@@ -11,12 +11,6 @@ from quorum.core.engine import Engine
 from quorum.storage.db import DB
 from quorum.core.reputation import ReputationManager
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
 app = typer.Typer(help="Quorum: Consensus reasoning engine")
 console = Console()
 
@@ -34,8 +28,8 @@ def ask(
         console.print(f"[red]Failed to load config: {e}[/red]")
         raise typer.Exit(1)
         
-    engine = Engine(config)
     db = DB()
+    engine = Engine(config, db)
     
     async def _run():
         await db.init_db()
