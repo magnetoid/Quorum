@@ -32,11 +32,11 @@ dev = [
 ]
 
 [project.scripts]
-quorum = "quorum.cli.main:app"
+quorum = "cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["quorum*"]
+include = ["core*", "adapters*", "server*", "storage*", "cli*"]
 
 [tool.ruff]
 line-length = 100

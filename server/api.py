@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
-from quorum.config import load_config
-from quorum.core.engine import Engine
-from quorum.storage.db import DB
+from config import load_config
+from core.engine import Engine
+from storage.db import DB
 
 app = FastAPI(title="Quorum API")
 config = load_config()

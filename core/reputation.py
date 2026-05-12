@@ -1,5 +1,5 @@
 from typing import Dict
-from quorum.storage.db import DB
+from storage.db import DB
 
 class ReputationManager:
     def __init__(self, db: DB):

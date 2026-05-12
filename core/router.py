@@ -1,5 +1,5 @@
 from typing import List
-from quorum.config import AppConfig
+from config import AppConfig
 
 class Router:
     def __init__(self, config: AppConfig):

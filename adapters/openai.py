@@ -1,39 +1,29 @@
 import httpx
 import os
 from .base import BaseAdapter, AdapterResponse
-from quorum.config import AppConfig
+from config import AppConfig
 
-class AnthropicAdapter(BaseAdapter):
+class OpenAIAdapter(BaseAdapter):
     def __init__(self, config: AppConfig):
         self.config = config
-        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY")
 
     async def generate(self, model: str, system_prompt: str, prompt: str) -> AdapterResponse:
         if not self.api_key:
-            return AdapterResponse(content="", error="Error: ANTHROPIC_API_KEY not set")
-        
-        # map shorthand to full model names
-        model_map = {
-            "claude-sonnet": "claude-3-5-sonnet-20241022",
-            "claude-opus": "claude-3-opus-20240229",
-            "claude-opus-4": "claude-3-opus-20240229" # fallback
-        }
-        actual_model = model_map.get(model, model)
-        
+            return AdapterResponse(content="", error="Error: OPENAI_API_KEY not set")
+            
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    "https://api.anthropic.com/v1/messages",
+                    "https://api.openai.com/v1/chat/completions",
                     headers={
-                        "x-api-key": self.api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
                     },
                     json={
-                        "model": actual_model,
-                        "system": system_prompt,
-                        "max_tokens": 1024,
+                        "model": model,
                         "messages": [
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ]
                     },
@@ -41,10 +31,10 @@ class AnthropicAdapter(BaseAdapter):
                 )
                 response.raise_for_status()
                 data = response.json()
-                content = data.get("content", [{}])[0].get("text", "").strip()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 usage = data.get("usage", {})
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
+                input_tokens = usage.get("prompt_tokens", 0)
+                output_tokens = usage.get("completion_tokens", 0)
                 
                 pricing = self.config.pricing.get(model)
                 cost = 0.0
@@ -58,4 +48,4 @@ class AnthropicAdapter(BaseAdapter):
                     cost=cost
                 )
             except Exception as e:
-                return AdapterResponse(content="", error=f"Error from Anthropic ({model}): {str(e)}")
+                return AdapterResponse(content="", error=f"Error from OpenAI ({model}): {str(e)}")

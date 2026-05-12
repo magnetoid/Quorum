@@ -2,17 +2,17 @@ import asyncio
 import uuid
 from typing import List, Dict, Any, Tuple
 
-from quorum.config import AppConfig
-from quorum.core.router import Router
-from quorum.core.voting import VotingEngine
-from quorum.adapters.base import BaseAdapter
-from quorum.adapters.ollama import OllamaAdapter
-from quorum.adapters.anthropic import AnthropicAdapter
-from quorum.adapters.openai import OpenAIAdapter
-from quorum.adapters.openrouter import OpenRouterAdapter
-from quorum.adapters.base import BaseAdapter, AdapterResponse
+from config import AppConfig
+from core.router import Router
+from core.voting import VotingEngine
+from adapters.base import BaseAdapter
+from adapters.ollama import OllamaAdapter
+from adapters.anthropic import AnthropicAdapter
+from adapters.openai import OpenAIAdapter
+from adapters.openrouter import OpenRouterAdapter
+from adapters.base import BaseAdapter, AdapterResponse
 
-from quorum.storage.db import DB
+from storage.db import DB
 
 class Engine:
     def __init__(self, config: AppConfig, db: DB):

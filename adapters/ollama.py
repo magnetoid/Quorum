@@ -1,7 +1,7 @@
 import httpx
 import os
 from .base import BaseAdapter, AdapterResponse
-from quorum.config import AppConfig
+from config import AppConfig
 
 class OllamaAdapter(BaseAdapter):
     def __init__(self, config: AppConfig):

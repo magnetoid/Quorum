@@ -1,5 +1,5 @@
 import pytest
-from quorum.core.voting import VotingEngine
+from core.voting import VotingEngine
 
 def test_voting_engine_consensus():
     engine = VotingEngine()

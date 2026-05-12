@@ -6,10 +6,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from quorum.config import load_config
-from quorum.core.engine import Engine
-from quorum.storage.db import DB
-from quorum.core.reputation import ReputationManager
+from config import load_config
+from core.engine import Engine
+from storage.db import DB
+from core.reputation import ReputationManager
 
 app = typer.Typer(help="Quorum: Consensus reasoning engine")
 console = Console()
@@ -100,7 +100,7 @@ def serve():
     """Start the REST + MCP server."""
     import uvicorn
     console.print("[green]Starting FastAPI server on port 8000...[/green]")
-    uvicorn.run("quorum.server.api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server.api:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
     app()
