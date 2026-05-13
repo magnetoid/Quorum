@@ -163,15 +163,20 @@ def run_config() -> int:
     while True:
         choice = _menu_main()
         if choice == "1":
-            _submenu_providers(cfg, env); dirty = True
+            _submenu_providers(cfg, env)
+            dirty = True
         elif choice == "2":
-            _submenu_council(cfg); dirty = True
+            _submenu_council(cfg)
+            dirty = True
         elif choice == "3":
-            _submenu_domains(cfg); dirty = True
+            _submenu_domains(cfg)
+            dirty = True
         elif choice == "4":
-            _submenu_budget(cfg); dirty = True
+            _submenu_budget(cfg)
+            dirty = True
         elif choice == "5":
-            _submenu_confidence(cfg); dirty = True
+            _submenu_confidence(cfg)
+            dirty = True
         elif choice == "s":
             if dirty:
                 _save_yaml(cfg)

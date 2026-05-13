@@ -4,8 +4,6 @@ Run each detector + fixer in isolation using tmp_path so we don't touch
 the real .env / config.yaml / quorum.db."""
 from __future__ import annotations
 
-import asyncio
-import os
 import sqlite3
 from pathlib import Path
 
@@ -13,7 +11,6 @@ import pytest
 import yaml
 
 from cli import repair as r
-from storage.db import DB
 
 
 @pytest.fixture

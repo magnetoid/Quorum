@@ -12,6 +12,8 @@ from .base import AdapterResponse, BaseAdapter
 from config import AppConfig
 
 
+from typing import Dict, Any, List
+
 class GeminiAdapter(BaseAdapter):
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -31,7 +33,7 @@ class GeminiAdapter(BaseAdapter):
         # header is the safe choice.
         url = f"{self.BASE_URL}/models/{api_model}:generateContent"
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        body = {
+        body: Dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         }
         if system_prompt:

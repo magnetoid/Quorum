@@ -5,10 +5,7 @@ that --all clears all three tables, and that missing-DB is handled cleanly."""
 from __future__ import annotations
 
 import asyncio
-import os
-from pathlib import Path
 
-import pytest
 
 from cli.clean import _clear_table, run_clean
 from storage.db import DB

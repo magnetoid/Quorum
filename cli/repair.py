@@ -16,7 +16,6 @@ import asyncio
 import os
 import shutil
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,7 +237,8 @@ def run_repair(non_interactive: bool = False) -> int:
         prompt = f"Fix '{issue.name}'?"
         if non_interactive or Confirm.ask(prompt, default=True):
             try:
-                issue.fix()
+                if issue.fix:
+                    issue.fix()
                 console.print(f"  [green]✓[/green] Fixed: {issue.name}")
                 fixed += 1
             except Exception as e:

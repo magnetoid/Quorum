@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from config import AppConfig
 from core.router import Router
@@ -34,7 +34,7 @@ class Engine:
         res = await adapter.generate(model, system, prompt)
         return model, res
 
-    async def run(self, prompt: str, domain: str = "default", budget: float = 0.05, override_models: List[str] = None) -> Dict[str, Any]:
+    async def run(self, prompt: str, domain: str = "default", budget: float = 0.05, override_models: Optional[List[str]] = None) -> Dict[str, Any]:
         query_id = str(uuid.uuid4())
         
         if domain == "default":

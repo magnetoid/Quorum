@@ -18,7 +18,7 @@ import asyncio
 import os
 import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import Callable, List, Tuple, Any
 
 import aiosqlite
 import typer
@@ -79,7 +79,7 @@ def run_clean(
     if all_flag:
         history = pending = reputation = pycache = True
 
-    actions: List[Tuple[str, callable]] = []
+    actions: List[Tuple[str, Callable[[], Any]]] = []
     if history:
         actions.append(("history records", lambda: asyncio.run(_clear_table("history"))))
     if pending:

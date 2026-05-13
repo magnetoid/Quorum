@@ -16,10 +16,12 @@ confidence, cost) so power users get more than just the bare consensus
 text without breaking OpenAI-style consumers."""
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
@@ -27,10 +29,33 @@ from config import load_config
 from core.engine import Engine
 from storage.db import DB
 
+from contextlib import asynccontextmanager
+
+# API Key security
+API_KEY_NAME = "X-Quorum-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+def get_api_key(api_key_header: str = Security(api_key_header)) -> str:
+    expected_key = os.environ.get("QUORUM_API_KEY")
+    if not expected_key:
+        return "" # No auth configured
+    if api_key_header == expected_key:
+        return api_key_header
+    # Fallback to Bearer token for OpenAI compatibility
+    raise HTTPException(
+        status_code=403, detail="Could not validate API key"
+    )
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.init_db()
+    yield
+
 app = FastAPI(
     title="Quorum API",
     description="Consensus reasoning engine — REST + OpenAI-compatible router + MCP.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS open by default for ease of integration. Tighten via config or a
@@ -73,14 +98,6 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False  # Streaming not yet supported; ignored.
-
-
-# ── Startup ─────────────────────────────────────────────────────────────────
-
-
-@app.on_event("startup")
-async def startup_event():
-    await db.init_db()
 
 
 # ── Liveness + REST ─────────────────────────────────────────────────────────

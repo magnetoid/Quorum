@@ -1,7 +1,7 @@
 import typer
 import asyncio
 import os
-from typing import List, Optional
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table

@@ -5,7 +5,6 @@ HTTP tests are deferred since they'd construct the full Engine + DB at
 import time."""
 from __future__ import annotations
 
-import pytest
 
 from server.api import _parse_model_spec
 
