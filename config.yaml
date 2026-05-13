@@ -1,43 +1,137 @@
 tiers:
   local:
-    models: [ollama/llama3.2, ollama/qwen2.5-coder]
+    models:
+    - ollama/llama3.2
+    - ollama/qwen2.5-coder
     confidence_threshold: 0.75
   cheap:
-    models: [gemini-flash, gpt-4o-mini]
+    models:
+    - gemini-flash
+    - gpt-4o-mini
     confidence_threshold: 0.85
   premium:
-    models: [claude-opus-4, o3]
+    models:
+    - claude-opus-4
+    - o3
     confidence_threshold: 0.95
-
 budget:
   default_per_query: 0.05
-
 domains:
-  code:        [ollama/qwen2.5-coder, claude-sonnet, gpt-4o]
-  finance:     [claude-opus, o3, gemini-pro]
-  architecture:[claude-sonnet, gpt-4o, ollama/llama3.2]
-  legal:       [claude-opus, gpt-4o]
-  creative:    [claude-sonnet, gpt-4o-mini, ollama/llama3.2]
-  factual:     [ollama/llama3.2, gemini-flash]
-
+  code:
+  - ollama/qwen2.5-coder
+  - claude-sonnet
+  - gpt-4o
+  finance:
+  - claude-opus
+  - o3
+  - gemini-pro
+  architecture:
+  - claude-sonnet
+  - gpt-4o
+  - ollama/llama3.2
+  legal:
+  - claude-opus
+  - gpt-4o
+  creative:
+  - claude-sonnet
+  - gpt-4o-mini
+  - ollama/llama3.2
+  factual:
+  - ollama/llama3.2
+  - gemini-flash
 personas:
-  code:         "You are a senior software engineer. Prefer concise, correct code with minimal commentary."
-  finance:      "You are a careful quantitative analyst. Show your reasoning and flag assumptions."
-  architecture: "You are a principal systems architect. Weigh trade-offs explicitly."
-  legal:        "You are a meticulous legal analyst. Cite jurisdiction and flag uncertainty."
-  creative:     "You are a strong creative writer. Be vivid and original."
-  factual:      "You are a precise fact-checker. Cite sources where possible and flag uncertainty."
-  default:      "You are a careful expert. Be precise and flag uncertainty."
-
-# Per-model pricing (USD per 1k tokens, input/output). Used for budget enforcement.
+  code: You are a senior software engineer. Prefer concise, correct code with minimal
+    commentary.
+  finance: You are a careful quantitative analyst. Show your reasoning and flag assumptions.
+  architecture: You are a principal systems architect. Weigh trade-offs explicitly.
+  legal: You are a meticulous legal analyst. Cite jurisdiction and flag uncertainty.
+  creative: You are a strong creative writer. Be vivid and original.
+  factual: You are a precise fact-checker. Cite sources where possible and flag uncertainty.
+  default: You are a careful expert. Be precise and flag uncertainty.
 pricing:
-  ollama/llama3.2:        { input: 0.0, output: 0.0 }
-  ollama/qwen2.5-coder:   { input: 0.0, output: 0.0 }
-  gemini-flash:           { input: 0.00035, output: 0.00105 }
-  gemini-pro:             { input: 0.00125, output: 0.005 }
-  gpt-4o-mini:            { input: 0.00015, output: 0.0006 }
-  gpt-4o:                 { input: 0.005, output: 0.015 }
-  o3:                     { input: 0.015, output: 0.06 }
-  claude-sonnet:          { input: 0.003, output: 0.015 }
-  claude-opus:            { input: 0.015, output: 0.075 }
-  claude-opus-4:          { input: 0.015, output: 0.075 }
+  ollama/llama3.2:
+    input: 0.0
+    output: 0.0
+  ollama/qwen2.5-coder:
+    input: 0.0
+    output: 0.0
+  gemini-flash:
+    input: 0.00035
+    output: 0.00105
+  gemini-pro:
+    input: 0.00125
+    output: 0.005
+  gpt-4o-mini:
+    input: 0.00015
+    output: 0.0006
+  gpt-4o:
+    input: 0.005
+    output: 0.015
+  o3:
+    input: 0.015
+    output: 0.06
+  claude-sonnet:
+    input: 0.003
+    output: 0.015
+  claude-opus:
+    input: 0.015
+    output: 0.075
+  claude-opus-4:
+    input: 0.015
+    output: 0.075
+voting:
+  cluster_threshold: 0.25
+  dispute_confidence: 0.66
+providers:
+  ollama:
+    enabled: true
+    api_key_env: null
+  anthropic:
+    enabled: true
+    api_key_env: ANTHROPIC_API_KEY
+  openai:
+    enabled: true
+    api_key_env: OPENAI_API_KEY
+  openrouter:
+    enabled: true
+    api_key_env: OPENROUTER_API_KEY
+  gemini:
+    enabled: false
+    api_key_env: GEMINI_API_KEY
+  cohere:
+    enabled: false
+    api_key_env: COHERE_API_KEY
+  groq:
+    enabled: false
+    api_key_env: GROQ_API_KEY
+  together:
+    enabled: false
+    api_key_env: TOGETHER_API_KEY
+  deepseek:
+    enabled: false
+    api_key_env: DEEPSEEK_API_KEY
+  fireworks:
+    enabled: false
+    api_key_env: FIREWORKS_API_KEY
+  mistral:
+    enabled: false
+    api_key_env: MISTRAL_API_KEY
+  xai:
+    enabled: false
+    api_key_env: XAI_API_KEY
+  perplexity:
+    enabled: false
+    api_key_env: PERPLEXITY_API_KEY
+  anyscale:
+    enabled: false
+    api_key_env: ANYSCALE_API_KEY
+  cerebras:
+    enabled: false
+    api_key_env: CEREBRAS_API_KEY
+  hf:
+    enabled: false
+    api_key_env: HF_API_KEY
+  azure:
+    enabled: false
+    api_key_env: AZURE_OPENAI_API_KEY
+    base_url: https://YOUR-RESOURCE.openai.azure.com/openai/v1

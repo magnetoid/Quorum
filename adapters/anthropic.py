@@ -12,11 +12,13 @@ class AnthropicAdapter(BaseAdapter):
         if not self.api_key:
             return AdapterResponse(content="", error="Error: ANTHROPIC_API_KEY not set")
         
-        # map shorthand to full model names
+        # Map friendly shorthand to current Anthropic model IDs. Dated IDs
+        # and the latest-alias forms (e.g. "claude-haiku-4-5") pass through.
         model_map = {
-            "claude-sonnet": "claude-3-5-sonnet-20241022",
-            "claude-opus": "claude-3-opus-20240229",
-            "claude-opus-4": "claude-3-opus-20240229" # fallback
+            "claude-haiku":   "claude-haiku-4-5",
+            "claude-sonnet":  "claude-sonnet-4-6",
+            "claude-opus":    "claude-opus-4-7",
+            "claude-opus-4":  "claude-opus-4-7",   # legacy config alias
         }
         actual_model = model_map.get(model, model)
         
