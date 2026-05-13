@@ -155,7 +155,7 @@ The big agent frameworks own *orchestration*. Mixture-of-Agents owns *layered sy
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/quorum
+git clone https://github.com/magnetoid/quorum
 cd quorum
 bash install.sh
 ```
