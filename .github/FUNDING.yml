@@ -3,9 +3,7 @@
 
 github: magnetoid
 ko_fi: magnetoid
-custom:
-  - "https://opencollective.com/quorum"
-# These are supported funding model platforms
+c
 
 patreon: # Replace with a single Patreon username
 open_collective: magnetoid
@@ -13,7 +11,6 @@ tidelift: # Replace with a single Tidelift platform-name/package-name e.g., npm/
 community_bridge: # Replace with a single Community Bridge project-name e.g., cloud-foundry
 liberapay: magnetoid
 issuehunt: # Replace with a single IssueHunt username
-lfx_crowdfunding: magnetoid
 polar: # Replace with a single Polar username
 buy_me_a_coffee: magnetoid
 thanks_dev: marko.tiosavljevic
