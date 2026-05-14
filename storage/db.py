@@ -43,6 +43,9 @@ class DB:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_pending_query ON pending_outcomes(query_id)"
             )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_reputation_domain ON reputation(domain)"
+            )
             await db.commit()
 
     async def get_reputation(self, domain: str) -> Dict[str, float]:

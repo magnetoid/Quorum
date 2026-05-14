@@ -1,18 +1,22 @@
 """Voting and consensus detection.
 
-V1 consensus is token-Jaccard clustering, reputation-weighted. Each response
-is tokenised, pairs above `cluster_threshold` are grouped, and the largest
-cluster (by summed reputation weight) wins. Confidence is the cluster's
-weighted share of the total; disputed_flag fires when confidence is below
-`dispute_confidence` and any responses fall outside the cluster.
+V1.5 consensus is token-Jaccard clustering with parallel similarity calculation,
+reputation-weighted. Each response is tokenised, pairs above `cluster_threshold`
+are grouped, and the largest cluster (by summed reputation weight) wins.
+Confidence is the cluster's weighted share of the total; disputed_flag fires
+when confidence is below `dispute_confidence` and any responses fall outside
+the cluster.
 
-Known limitation — lexical, not semantic. "X is true" and "X is false" share
-most tokens but contradict; Jaccard can't tell them apart. Replace this
-module with embedding-based or peer-review aggregation when semantic
-accuracy matters (see dev order step 2 follow-up)."""
+Enhancements:
+- Parallel pairwise similarity computation for large model counts
+- Negation penalty to avoid false consensus on contradictions
+- Cohesion pruning to prevent bridge responses from merging unrelated clusters
+- Canonical label extraction for structured response types (yes/no, A/B/C/D, numeric)
+"""
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 
@@ -136,9 +140,11 @@ def _canonical_label(text: str) -> Optional[str]:
 
 
 class VotingEngine:
-    def __init__(self, cluster_threshold: float = 0.25, dispute_confidence: float = 0.66):
+    def __init__(self, cluster_threshold: float = 0.25, dispute_confidence: float = 0.66, max_workers: int = 8, parallel_threshold: int = 20):
         self.cluster_threshold = cluster_threshold
         self.dispute_confidence = dispute_confidence
+        self.max_workers = max_workers  # Max threads for parallel similarity calculation
+        self.parallel_threshold = parallel_threshold  # Use parallel only when models >= this
 
     def aggregate(
         self,
@@ -241,11 +247,33 @@ class VotingEngine:
 
         sims: Dict[str, Dict[str, float]] = {m: {} for m, _ in valid_items}
         models = [m for m, _ in valid_items]
-        for i, a in enumerate(models):
-            for b in models[i + 1 :]:
-                s = _jaccard(token_sets[a], token_sets[b])
-                sims[a][b] = s
-                sims[b][a] = s
+        
+        # Use parallel processing for large model counts, sequential for small sets
+        if len(models) >= self.parallel_threshold:
+            # Generate all pairs to compute
+            pairs = []
+            for i, a in enumerate(models):
+                for b in models[i + 1 :]:
+                    pairs.append((a, b, token_sets[a], token_sets[b]))
+            
+            # Compute similarities in parallel
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_to_pair = {
+                    executor.submit(_jaccard, ts_a, ts_b): (a, b) 
+                    for a, b, ts_a, ts_b in pairs
+                }
+                for future in as_completed(future_to_pair):
+                    a, b = future_to_pair[future]
+                    s = future.result()
+                    sims[a][b] = s
+                    sims[b][a] = s
+        else:
+            # Sequential for small model counts (avoids thread overhead)
+            for i, a in enumerate(models):
+                for b in models[i + 1 :]:
+                    s = _jaccard(token_sets[a], token_sets[b])
+                    sims[a][b] = s
+                    sims[b][a] = s
 
         def sim(a: str, b: str) -> float:
             if a == b:
