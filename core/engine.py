@@ -111,22 +111,21 @@ class Engine:
         # Record tentative reputation deltas for the feedback loop. Consensus
         # members tentatively +1, dissenters -1; minority/sole/Error votes
         # contribute 0. Confirmed (or flipped) by `quorum feedback`.
-        deltas = []
-        for agent in output.get("agents", []):
-            vote = agent.get("vote", "")
-            if vote in ("anchor", "consensus"):
-                deltas.append((agent["model"], domain, 1.0))
-            elif vote == "dissent":
-                deltas.append((agent["model"], domain, -1.0))
-        if deltas:
-            try:
-                await self.db.save_pending_outcomes(query_id, deltas)
-            except Exception as e:
-                # Never fail the user query if pending-outcome write fails,
-                # but surface it so operators can see the loop is broken.
-                logger.warning(
-                    "save_pending_outcomes failed for query %s: %s: %s",
-                    query_id, type(e).__name__, e,
-                )
+        if not output.get("disputed_flag"):
+            deltas = []
+            for agent in output.get("agents", []):
+                vote = agent.get("vote", "")
+                if vote in ("anchor", "consensus"):
+                    deltas.append((agent["model"], domain, 1.0))
+                elif vote == "dissent":
+                    deltas.append((agent["model"], domain, -1.0))
+            if deltas:
+                try:
+                    await self.db.save_pending_outcomes(query_id, deltas)
+                except Exception as e:
+                    logger.warning(
+                        "save_pending_outcomes failed for query %s: %s: %s",
+                        query_id, type(e).__name__, e,
+                    )
 
         return output
