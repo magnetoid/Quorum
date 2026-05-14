@@ -187,7 +187,7 @@ After setup, `quorum doctor` runs to verify everything is reachable.
 
 ## Quick start
 
-Once installed, three commands cover the basics:
+Once installed, these commands cover the basics:
 
 ```bash
 quorum ask "your question here"                      # default council
@@ -455,6 +455,9 @@ quorum mcp                      # MCP server over stdio (for local agents)
 - [x] Word-boundary domain classifier (replaces brittle substring matching)
 - [x] Interactive `quorum config` for feature toggles
 - [x] CORS + `/healthz` endpoint
+- [x] Strict static typing, `mypy` enforcement, and `pytest` coverage
+- [x] Optimized SQLite concurrent access (`WAL` mode)
+- [x] API Key security for REST endpoints (`X-Quorum-Key` and `Bearer`)
 - [ ] **Voting v2** — semantic consensus (embeddings or peer review) to catch numeric / semantic disputes
 - [ ] **Retries + circuit breakers + per-provider timeouts** — production-grade resilience
 - [ ] **OpenTelemetry GenAI conventions** — Datadog/Honeycomb/Grafana out of the box
@@ -478,8 +481,8 @@ Quorum is built and maintained by an independent developer in their spare time. 
 - **Security audit** before recommending Quorum for production internal-tool use
 - **Contributor stipends** for tested PRs
 
-[![Sponsor on GitHub](https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?logo=github)](https://github.com/sponsors/YOUR_USERNAME)
-[![Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-29abe0?logo=ko-fi&logoColor=white)](https://ko-fi.com/YOUR_HANDLE)
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?logo=github)](https://github.com/magnetoid)
+[![Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-29abe0?logo=ko-fi&logoColor=white)](https://ko-fi.com/magnetoid)
 
 Early backers will be listed here — get in touch if you want a logo placement.
 
@@ -502,7 +505,7 @@ If you use Quorum in research, please cite:
   title  = {Quorum: A consensus reasoning engine for LLMs},
   author = {Tiosavljevic, Marko},
   year   = {2026},
-  url    = {https://github.com/YOUR_USERNAME/quorum},
+  url    = {https://github.com/magnetoid/Quorum},
 }
 ```
 
