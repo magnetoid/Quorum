@@ -1,17 +1,18 @@
 import asyncio
 import logging
 import uuid
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from config import AppConfig
 from core.router import Router
 from core.voting import VotingEngine
 from adapters import build_adapter, provider_for_model
-from adapters.base import BaseAdapter, AdapterResponse
+from adapters.base import AdapterResponse, BaseAdapter
 
 from storage.db import DB
 
 logger = logging.getLogger(__name__)
+
 
 class Engine:
     def __init__(self, config: AppConfig, db: DB):
@@ -30,71 +31,118 @@ class Engine:
         return self.adapters[provider]
 
     async def _ask_model(self, model: str, system: str, prompt: str) -> Tuple[str, AdapterResponse]:
-        adapter = self._get_adapter(model)
-        res = await adapter.generate(model, system, prompt)
-        return model, res
+        """Ask one model without letting provider failures crash the council."""
+        try:
+            adapter = self._get_adapter(model)
+            res = await adapter.generate(model, system, prompt)
+            return model, res
+        except Exception as e:
+            logger.warning(
+                "model %s failed before returning AdapterResponse: %s: %s",
+                model,
+                type(e).__name__,
+                e,
+            )
+            return model, AdapterResponse(
+                content="",
+                error=f"Error from {model}: {type(e).__name__}: {e}",
+            )
 
-    async def run(self, prompt: str, domain: str = "default", budget: float = 0.05, override_models: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def _ask_models(
+        self,
+        models: List[str],
+        system_prompt: str,
+        prompt: str,
+    ) -> Dict[str, AdapterResponse]:
+        if not models:
+            return {}
+        tasks = [self._ask_model(model, system_prompt, prompt) for model in models]
+        results = await asyncio.gather(*tasks)
+        return {model: res for model, res in results}
+
+    @staticmethod
+    def _voting_inputs(responses: Dict[str, AdapterResponse]) -> Dict[str, str]:
+        """Pass both successful and failed models into voting.
+
+        VotingEngine already knows how to mark empty/Error-prefixed responses as
+        Error agents. Keeping failures in this dict prevents provider outages
+        from disappearing from CLI/API output.
+        """
+        return {
+            model: (res.error if res.error else res.content)
+            for model, res in responses.items()
+        }
+
+    async def run(
+        self,
+        prompt: str,
+        domain: str = "default",
+        budget: float = 0.05,
+        override_models: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         query_id = str(uuid.uuid4())
-        
+
         if domain == "default":
             domain = self.router.classify_domain(prompt)
-            
+
         system_prompt = self.config.personas.get(domain, self.config.personas.get("default", ""))
-        
+
         total_cost = 0.0
         all_responses: Dict[str, AdapterResponse] = {}
-        
+
         if override_models:
-            # Bypass tiering if models are explicitly requested
-            tasks = [self._ask_model(model, system_prompt, prompt) for model in override_models]
-            results = await asyncio.gather(*tasks)
-            all_responses = {model: res for model, res in results}
+            # Bypass tiering if models are explicitly requested.
+            all_responses = await self._ask_models(override_models, system_prompt, prompt)
             total_cost = sum(res.cost for res in all_responses.values())
         else:
-            # Tiered execution
+            # Tiered execution.
             tiers = ["local", "cheap", "premium"]
             domain_allowed_models = set(self.config.domains.get(domain, []))
-            
+
             for tier_name in tiers:
                 tier_config = self.config.tiers.get(tier_name)
                 if not tier_config:
                     continue
-                    
-                # Filter tier models to only those allowed in this domain
+
+                # Filter tier models to only those allowed in this domain.
                 tier_models = [m for m in tier_config.models if m in domain_allowed_models]
                 if not tier_models:
                     continue
-                    
-                tasks = [self._ask_model(model, system_prompt, prompt) for model in tier_models]
-                results = await asyncio.gather(*tasks)
-                
-                for model, res in results:
+
+                tier_responses = await self._ask_models(tier_models, system_prompt, prompt)
+
+                for model, res in tier_responses.items():
                     all_responses[model] = res
                     total_cost += res.cost
-                
-                # Check consensus
-                # Voting engine expects dict of string responses
+
+                # Check consensus. Include failed models so outages stay visible
+                # as Error agents in intermediate/final outputs.
                 reputation_weights = await self.db.get_reputation(domain)
-                str_responses = {m: r.content for m, r in all_responses.items() if not r.error}
-                output = self.voting.aggregate(str_responses, domain, reputation_weights)
-                
+                output = self.voting.aggregate(
+                    self._voting_inputs(all_responses),
+                    domain,
+                    reputation_weights,
+                )
+
                 if output["confidence"] >= tier_config.confidence_threshold:
                     break
-                    
+
                 if total_cost >= budget:
                     break
-        
-        # Final aggregation
+
+        # Final aggregation.
         reputation_weights = await self.db.get_reputation(domain)
-        str_responses = {m: r.content for m, r in all_responses.items() if not r.error}
-        output = self.voting.aggregate(str_responses, domain, reputation_weights)
-        
-        # Add metadata
+        output = self.voting.aggregate(
+            self._voting_inputs(all_responses),
+            domain,
+            reputation_weights,
+        )
+
+        # Add metadata.
         output["domain"] = domain
         output["query_id"] = query_id
         output["cost"] = f"${total_cost:.4f}"
-        
+
         # Attach token + cost telemetry to each agent so downstream consumers
         # (router API, CLI rendering, MCP responses) can report usage.
         for agent in output.get("agents", []):
@@ -125,7 +173,9 @@ class Engine:
                 except Exception as e:
                     logger.warning(
                         "save_pending_outcomes failed for query %s: %s: %s",
-                        query_id, type(e).__name__, e,
+                        query_id,
+                        type(e).__name__,
+                        e,
                     )
 
         return output
