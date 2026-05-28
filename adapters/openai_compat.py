@@ -5,15 +5,23 @@ same request/response schema as OpenAI's. This adapter parameterises host
 and credential so a single class covers Groq, Together, DeepSeek, Fireworks,
 Mistral, xAI, Perplexity, Anyscale, Azure OpenAI, HuggingFace Inference,
 and Cerebras. Model IDs use a `provider/model` prefix that gets stripped
-before the API call."""
+before the API call.
+"""
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
+from typing import Any, Dict, Optional
 
 import httpx
 
 from .base import AdapterResponse, BaseAdapter
 from config import AppConfig
+
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
 class OpenAICompatAdapter(BaseAdapter):
@@ -32,12 +40,92 @@ class OpenAICompatAdapter(BaseAdapter):
         self.api_key_env = api_key_env
         self.api_key = os.getenv(api_key_env, "")
         self.model_prefix = model_prefix
-        self.timeout = timeout
+        self.timeout = float(os.getenv("QUORUM_PROVIDER_TIMEOUT", timeout))
+        self.max_retries = max(0, int(os.getenv("QUORUM_PROVIDER_RETRIES", "2")))
+        self.backoff_base = max(0.0, float(os.getenv("QUORUM_PROVIDER_BACKOFF_BASE", "0.5")))
 
     def _api_model(self, model: str) -> str:
         if self.model_prefix and model.startswith(self.model_prefix):
-            return model[len(self.model_prefix):]
+            return model[len(self.model_prefix) :]
         return model
+
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _payload(api_model: str, system_prompt: str, prompt: str) -> Dict[str, Any]:
+        return {
+            "model": api_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+        }
+
+    def _retry_delay(self, attempt: int, response: Optional[httpx.Response] = None) -> float:
+        if response is not None:
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    return min(float(retry_after), 10.0)
+                except ValueError:
+                    pass
+        return min(self.backoff_base * (2 ** attempt), 10.0)
+
+    async def _post_with_retries(
+        self,
+        client: httpx.AsyncClient,
+        api_model: str,
+        system_prompt: str,
+        prompt: str,
+    ) -> httpx.Response:
+        last_exc: Optional[Exception] = None
+        url = f"{self.base_url}/chat/completions"
+
+        for attempt in range(self.max_retries + 1):
+            response: Optional[httpx.Response] = None
+            try:
+                response = await client.post(
+                    url,
+                    headers=self._headers(),
+                    json=self._payload(api_model, system_prompt, prompt),
+                )
+                if response.status_code not in _RETRYABLE_STATUS_CODES:
+                    response.raise_for_status()
+                    return response
+                last_exc = httpx.HTTPStatusError(
+                    f"Retryable status code {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if isinstance(exc, httpx.HTTPStatusError):
+                    status = exc.response.status_code
+                    if status not in _RETRYABLE_STATUS_CODES:
+                        raise
+            except Exception:
+                raise
+
+            if attempt < self.max_retries:
+                delay = self._retry_delay(attempt, response)
+                logger.warning(
+                    "Retrying %s request for %s after %.2fs (attempt %s/%s): %s",
+                    self.provider,
+                    api_model,
+                    delay,
+                    attempt + 1,
+                    self.max_retries,
+                    last_exc,
+                )
+                await asyncio.sleep(delay)
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("provider request failed without an exception")
 
     async def generate(self, model: str, system_prompt: str, prompt: str) -> AdapterResponse:
         if not self.api_key:
@@ -46,21 +134,7 @@ class OpenAICompatAdapter(BaseAdapter):
         api_model = self._api_model(model)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": api_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                    },
-                )
-                response.raise_for_status()
+                response = await self._post_with_retries(client, api_model, system_prompt, prompt)
                 data = response.json()
                 content = (
                     data.get("choices", [{}])[0]
