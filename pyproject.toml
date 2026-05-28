@@ -30,6 +30,10 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+semantic = [
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+]
 
 [project.scripts]
 quorum = "cli.main:app"
