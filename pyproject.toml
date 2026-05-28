@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.6",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
+    "strawberry-graphql[fastapi]>=0.235",
 ]
 
 [project.optional-dependencies]
