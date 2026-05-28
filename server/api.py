@@ -13,43 +13,60 @@ Plus the MCP SSE app mounted at `/mcp`. The OpenAI-compatible endpoint
 returns the standard OpenAI shape, with an extra top-level `quorum` field
 carrying the full consensus result (disputed zones, per-agent votes,
 confidence, cost) so power users get more than just the bare consensus
-text without breaking OpenAI-style consumers."""
+text without breaking OpenAI-style consumers.
+"""
 from __future__ import annotations
 
 import os
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, Depends, Security
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, FastAPI, Header, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict
 
 from config import load_config
 from core.engine import Engine
 from storage.db import DB
 
-from contextlib import asynccontextmanager
 
-# API Key security
+# API Key security. If QUORUM_API_KEY is unset, auth is disabled for local dev.
+# When set, clients may authenticate either with X-Quorum-Key or the
+# OpenAI-compatible Authorization: Bearer <key> header.
 API_KEY_NAME = "X-Quorum-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
-def get_api_key(api_key_header: str = Security(api_key_header)) -> str:
+
+def _env_csv(name: str, default: str) -> List[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+def get_api_key(
+    api_key_header: Optional[str] = Security(api_key_header),
+    authorization: Optional[str] = Header(default=None),
+) -> str:
     expected_key = os.environ.get("QUORUM_API_KEY")
     if not expected_key:
-        return "" # No auth configured
+        return ""  # No auth configured; useful for local development.
+
     if api_key_header == expected_key:
         return api_key_header
-    # Fallback to Bearer token for OpenAI compatibility
-    raise HTTPException(
-        status_code=403, detail="Could not validate API key"
-    )
+
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token.strip() == expected_key:
+            return token.strip()
+
+    raise HTTPException(status_code=403, detail="Could not validate API key")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
     yield
+
 
 app = FastAPI(
     title="Quorum API",
@@ -58,14 +75,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS open by default for ease of integration. Tighten via config or a
-# reverse proxy if deploying outside localhost.
+# CORS defaults are local-dev friendly, but production deployments should set:
+# QUORUM_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+allowed_origins = _env_csv(
+    "QUORUM_ALLOWED_ORIGINS",
+    "http://localhost,http://localhost:3000,http://127.0.0.1,http://127.0.0.1:3000",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", API_KEY_NAME],
 )
 
 config = load_config()
@@ -113,7 +135,7 @@ async def healthz() -> Dict[str, Any]:
     }
 
 
-@app.post("/api/ask")
+@app.post("/api/ask", dependencies=[Depends(get_api_key)])
 async def ask(req: AskRequest) -> Dict[str, Any]:
     try:
         result = await engine.run(
@@ -152,13 +174,15 @@ def _parse_model_spec(model: str) -> Tuple[str, Optional[List[str]]]:
     if model == "quorum":
         return ("default", None)
     if model.startswith("quorum:"):
-        spec = model[len("quorum:"):]
+        spec = model[len("quorum:") :]
         if not spec:
             return ("default", None)
         if ":" in spec:
             domain_part, _, models_part = spec.partition(":")
-            return (domain_part or "default",
-                    [m.strip() for m in models_part.split(",") if m.strip()])
+            return (
+                domain_part or "default",
+                [m.strip() for m in models_part.split(",") if m.strip()],
+            )
         if "," in spec or "/" in spec:
             return ("default", [m.strip() for m in spec.split(",") if m.strip()])
         return (spec, None)
@@ -166,7 +190,7 @@ def _parse_model_spec(model: str) -> Tuple[str, Optional[List[str]]]:
     return ("default", [model])
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", dependencies=[Depends(get_api_key)])
 async def chat_completions(req: ChatCompletionRequest) -> Dict[str, Any]:
     """OpenAI-compatible chat-completions router.
 
@@ -249,4 +273,5 @@ async def chat_completions(req: ChatCompletionRequest) -> Dict[str, Any]:
 # it at /mcp alongside the REST endpoints. Stdio transport for local agents
 # is exposed separately via the `quorum mcp` CLI command.
 from server.mcp import mcp_app  # noqa: E402  (deferred to avoid circular import)
+
 app.mount("/mcp", mcp_app())
