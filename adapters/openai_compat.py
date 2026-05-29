@@ -24,6 +24,28 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
+def _safe_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %.2f", name, raw, default)
+        return default
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+        return default
+
+
 class OpenAICompatAdapter(BaseAdapter):
     def __init__(
         self,
@@ -40,14 +62,36 @@ class OpenAICompatAdapter(BaseAdapter):
         self.api_key_env = api_key_env
         self.api_key = os.getenv(api_key_env, "")
         self.model_prefix = model_prefix
-        self.timeout = float(os.getenv("QUORUM_PROVIDER_TIMEOUT", timeout))
-        self.max_retries = max(0, int(os.getenv("QUORUM_PROVIDER_RETRIES", "2")))
-        self.backoff_base = max(0.0, float(os.getenv("QUORUM_PROVIDER_BACKOFF_BASE", "0.5")))
+        self.timeout = _safe_float_env("QUORUM_PROVIDER_TIMEOUT", timeout)
+        self.max_retries = max(0, _safe_int_env("QUORUM_PROVIDER_RETRIES", 2))
+        self.backoff_base = max(0.0, _safe_float_env("QUORUM_PROVIDER_BACKOFF_BASE", 0.5))
+        self.max_connections = max(1, _safe_int_env("QUORUM_PROVIDER_MAX_CONNECTIONS", 100))
+        self.max_keepalive = max(1, _safe_int_env("QUORUM_PROVIDER_MAX_KEEPALIVE", 20))
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
 
     def _api_model(self, model: str) -> str:
         if self.model_prefix and model.startswith(self.model_prefix):
             return model[len(self.model_prefix) :]
         return model
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is not None and not self._client.is_closed:
+            return self._client
+        async with self._client_lock:
+            if self._client is None or self._client.is_closed:
+                self._client = httpx.AsyncClient(
+                    timeout=self.timeout,
+                    limits=httpx.Limits(
+                        max_connections=self.max_connections,
+                        max_keepalive_connections=self.max_keepalive,
+                    ),
+                )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -132,30 +176,30 @@ class OpenAICompatAdapter(BaseAdapter):
             return AdapterResponse(content="", error=f"Error: {self.api_key_env} not set")
 
         api_model = self._api_model(model)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await self._post_with_retries(client, api_model, system_prompt, prompt)
-                data = response.json()
-                content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    .strip()
-                )
-                usage = data.get("usage", {}) or {}
-                input_tokens = int(usage.get("prompt_tokens", 0) or 0)
-                output_tokens = int(usage.get("completion_tokens", 0) or 0)
+        client = await self._get_client()
+        try:
+            response = await self._post_with_retries(client, api_model, system_prompt, prompt)
+            data = response.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            usage = data.get("usage", {}) or {}
+            input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+            output_tokens = int(usage.get("completion_tokens", 0) or 0)
 
-                pricing = self.config.pricing.get(model)
-                cost = 0.0
-                if pricing:
-                    cost = (input_tokens * pricing.input + output_tokens * pricing.output) / 1000.0
+            pricing = self.config.pricing.get(model)
+            cost = 0.0
+            if pricing:
+                cost = (input_tokens * pricing.input + output_tokens * pricing.output) / 1000.0
 
-                return AdapterResponse(
-                    content=content,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost=cost,
-                )
-            except Exception as e:
-                return AdapterResponse(content="", error=f"Error from {self.provider} ({model}): {e}")
+            return AdapterResponse(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost,
+            )
+        except Exception as e:
+            return AdapterResponse(content="", error=f"Error from {self.provider} ({model}): {e}")
