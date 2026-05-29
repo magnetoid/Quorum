@@ -1,85 +1,56 @@
 """Voting and consensus detection.
 
-V1.5 consensus is token-Jaccard clustering with parallel similarity calculation,
-reputation-weighted. Each response is tokenised, pairs above `cluster_threshold`
-are grouped, and the largest cluster (by summed reputation weight) wins.
-Confidence is the cluster's weighted share of the total; disputed_flag fires
-when confidence is below `dispute_confidence` and any responses fall outside
-the cluster.
+The voting engine uses a layered strategy:
 
-Enhancements:
-- Parallel pairwise similarity computation for large model counts
-- Negation penalty to avoid false consensus on contradictions
-- Cohesion pruning to prevent bridge responses from merging unrelated clusters
-- Canonical label extraction for structured response types (yes/no, A/B/C/D, numeric)
+1. Canonical labels for structured answers: yes/no, choices, numeric answers.
+2. Optional semantic embeddings when `sentence-transformers` is installed.
+3. Token-Jaccard fallback when semantic voting is disabled or unavailable.
+
+Semantic voting is intentionally optional. Install with:
+
+    pip install "quorum[semantic]"
+
+Environment controls:
+
+    QUORUM_SEMANTIC_VOTING=auto|on|off   default: auto
+    QUORUM_SEMANTIC_MODEL=all-MiniLM-L6-v2
+    QUORUM_SEMANTIC_WEIGHT=0.7
 """
 from __future__ import annotations
 
+import logging
+import math
+import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Sequence
 
+logger = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"\w+")
 
 _STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "because",
-    "but",
-    "by",
-    "can",
-    "could",
-    "does",
-    "for",
-    "from",
-    "have",
-    "how",
-    "i",
-    "if",
-    "in",
-    "is",
-    "it",
-    "its",
-    "may",
-    "might",
-    "of",
-    "on",
-    "or",
-    "our",
-    "should",
-    "so",
-    "that",
-    "the",
-    "their",
-    "then",
-    "there",
-    "these",
-    "this",
-    "to",
-    "we",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "why",
-    "with",
-    "would",
-    "you",
-    "your",
-    "use",
-    "using",
+    "a", "an", "and", "are", "as", "at", "be", "because", "but", "by",
+    "can", "could", "does", "for", "from", "have", "how", "i", "if", "in",
+    "is", "it", "its", "may", "might", "of", "on", "or", "our", "should",
+    "so", "that", "the", "their", "then", "there", "these", "this", "to",
+    "we", "what", "when", "where", "which", "who", "why", "with", "would",
+    "you", "your", "use", "using",
 }
 
 _NEGATIONS = {"no", "not", "never", "none", "cannot", "can't", "won't"}
-
 _YES = {"yes", "y", "true", "correct"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %.2f", name, raw, default)
+        return default
 
 
 def _tokens(text: str) -> set[str]:
@@ -91,7 +62,7 @@ def _tokens(text: str) -> set[str]:
     return tokens
 
 
-def _jaccard(a: set, b: set) -> float:
+def _jaccard(a: set[str], b: set[str]) -> float:
     if not a and not b:
         return 1.0
     a0 = set(a)
@@ -139,12 +110,96 @@ def _canonical_label(text: str) -> Optional[str]:
     return None
 
 
+@lru_cache(maxsize=1)
+def _semantic_model():
+    model_name = os.getenv("QUORUM_SEMANTIC_MODEL", "all-MiniLM-L6-v2")
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+    except Exception as e:
+        logger.info("Semantic voting unavailable: sentence-transformers import failed: %s", e)
+        return None
+    try:
+        return SentenceTransformer(model_name)
+    except Exception as e:
+        logger.warning("Semantic voting unavailable: failed to load %s: %s", model_name, e)
+        return None
+
+
+def _dot(a: Sequence[float], b: Sequence[float]) -> float:
+    return sum(float(x) * float(y) for x, y in zip(a, b))
+
+
+def _norm(a: Sequence[float]) -> float:
+    return math.sqrt(sum(float(x) * float(x) for x in a))
+
+
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    denom = _norm(a) * _norm(b)
+    if denom <= 0:
+        return 0.0
+    # Normalize from [-1, 1] to [0, 1] to match Jaccard scale.
+    return max(0.0, min(1.0, (_dot(a, b) / denom + 1.0) / 2.0))
+
+
+def _semantic_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
+    mode = os.getenv("QUORUM_SEMANTIC_VOTING", "auto").lower().strip()
+    if mode in {"0", "false", "off", "disabled"}:
+        return None
+    model = _semantic_model()
+    if model is None:
+        if mode == "on":
+            logger.warning("QUORUM_SEMANTIC_VOTING=on but semantic model is unavailable")
+        return None
+    try:
+        vectors = model.encode(texts, normalize_embeddings=True)
+        return [list(map(float, v)) for v in vectors]
+    except Exception as e:
+        logger.warning("Semantic embedding failed; falling back to lexical voting: %s", e)
+        return None
+
+
+def _build_similarity_matrix(valid_items: List[tuple[str, str]]) -> tuple[Dict[str, Dict[str, float]], str]:
+    models = [m for m, _ in valid_items]
+    texts = [t for _, t in valid_items]
+    token_sets = {m: _tokens(t) for m, t in valid_items}
+    sims: Dict[str, Dict[str, float]] = {m: {} for m in models}
+
+    embeddings = _semantic_embeddings(texts)
+    semantic_weight = max(0.0, min(1.0, _env_float("QUORUM_SEMANTIC_WEIGHT", 0.7)))
+    method = "lexical"
+    if embeddings is not None and len(embeddings) == len(models):
+        method = "hybrid-semantic"
+
+    for i, a in enumerate(models):
+        for j, b in enumerate(models[i + 1 :], start=i + 1):
+            lexical = _jaccard(token_sets[a], token_sets[b])
+            if method == "hybrid-semantic":
+                semantic = _cosine(embeddings[i], embeddings[j])
+                score = semantic_weight * semantic + (1.0 - semantic_weight) * lexical
+                # Preserve the existing negation safety: if one answer is negated
+                # and the other is not, do not let embeddings alone create a false
+                # consensus.
+                if ("__neg__" in token_sets[a]) ^ ("__neg__" in token_sets[b]):
+                    score = min(score, lexical)
+            else:
+                score = lexical
+            sims[a][b] = score
+            sims[b][a] = score
+    return sims, method
+
+
 class VotingEngine:
-    def __init__(self, cluster_threshold: float = 0.25, dispute_confidence: float = 0.66, max_workers: int = 8, parallel_threshold: int = 20):
+    def __init__(
+        self,
+        cluster_threshold: float = 0.25,
+        dispute_confidence: float = 0.66,
+        max_workers: int = 8,
+        parallel_threshold: int = 20,
+    ):
         self.cluster_threshold = cluster_threshold
         self.dispute_confidence = dispute_confidence
-        self.max_workers = max_workers  # Max threads for parallel similarity calculation
-        self.parallel_threshold = parallel_threshold  # Use parallel only when models >= this
+        self.max_workers = max_workers
+        self.parallel_threshold = parallel_threshold
 
     def aggregate(
         self,
@@ -159,6 +214,7 @@ class VotingEngine:
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": [],
+                "similarity_method": "none",
             }
 
         reputation_weights = reputation_weights or {}
@@ -178,10 +234,14 @@ class VotingEngine:
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": error_agents,
+                "similarity_method": "none",
             }
 
         def weight(m: str) -> float:
             return max(reputation_weights.get(m, 1.0), 0.1)
+
+        def cluster_weight(cluster: List[str]) -> float:
+            return sum(weight(m) for m in cluster)
 
         if len(valid_items) == 1:
             m, t = valid_items[0]
@@ -191,10 +251,8 @@ class VotingEngine:
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": [{"model": m, "response": t, "vote": "sole"}] + error_agents,
+                "similarity_method": "sole",
             }
-
-        def cluster_weight(cluster: List[str]) -> float:
-            return sum(weight(m) for m in cluster)
 
         canon: Dict[str, str] = {}
         for m, t in valid_items:
@@ -205,15 +263,14 @@ class VotingEngine:
             label_to_models: Dict[str, List[str]] = {}
             for m, lab in canon.items():
                 label_to_models.setdefault(lab, []).append(m)
-            total_weight = sum(weight(m) for m, _ in valid_items)
-            best_label = max(label_to_models.items(), key=lambda kv: cluster_weight(kv[1]))[0]
-            best_models = label_to_models[best_label]
-            label_conf = cluster_weight(best_models) / total_weight if total_weight else 0.0
             if len(label_to_models) >= 2 and len(canon) >= 2:
-                consensus_cluster = best_models
+                total_weight = sum(weight(m) for m, _ in valid_items)
+                best_label = max(label_to_models.items(), key=lambda kv: cluster_weight(kv[1]))[0]
+                consensus_cluster = label_to_models[best_label]
+                label_conf = cluster_weight(consensus_cluster) / total_weight if total_weight else 0.0
                 anchor = max(consensus_cluster, key=lambda m: (weight(m), len(responses[m])))
                 out_cluster = [m for m, _ in valid_items if m not in consensus_cluster]
-                disputed_flag = label_conf < self.dispute_confidence
+                disputed_flag = bool(out_cluster) and label_conf < self.dispute_confidence
 
                 if disputed_flag:
                     consensus_text = "Models disagreed."
@@ -222,58 +279,29 @@ class VotingEngine:
                     consensus_text = responses[anchor]
                     disputed = "\n\n---\n\n".join(f"{m}: {responses[m]}" for m in out_cluster) if out_cluster else ""
 
-                agents_out_canon: List[Dict[str, Any]] = []
+                agents_out: List[Dict[str, Any]] = []
                 for m, t in valid_items:
                     if disputed_flag:
                         vote = "minority" if m in consensus_cluster else "dissent"
+                    elif m == anchor:
+                        vote = "anchor"
+                    elif m in consensus_cluster:
+                        vote = "consensus"
                     else:
-                        if m == anchor:
-                            vote = "anchor"
-                        elif m in consensus_cluster:
-                            vote = "consensus"
-                        else:
-                            vote = "dissent"
-                    agents_out_canon.append({"model": m, "response": t, "vote": vote})
-                agents_out_canon.extend(error_agents)
+                        vote = "dissent"
+                    agents_out.append({"model": m, "response": t, "vote": vote})
+                agents_out.extend(error_agents)
                 return {
                     "consensus": consensus_text,
                     "confidence": round(label_conf, 3),
                     "disputed": disputed,
                     "disputed_flag": disputed_flag,
-                    "agents": agents_out_canon,
+                    "agents": agents_out,
+                    "similarity_method": "canonical-label",
                 }
 
-        token_sets = {m: _tokens(t) for m, t in valid_items}
-
-        sims: Dict[str, Dict[str, float]] = {m: {} for m, _ in valid_items}
+        sims, method = _build_similarity_matrix(valid_items)
         models = [m for m, _ in valid_items]
-        
-        # Use parallel processing for large model counts, sequential for small sets
-        if len(models) >= self.parallel_threshold:
-            # Generate all pairs to compute
-            pairs = []
-            for i, a in enumerate(models):
-                for b in models[i + 1 :]:
-                    pairs.append((a, b, token_sets[a], token_sets[b]))
-            
-            # Compute similarities in parallel
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                future_to_pair = {
-                    executor.submit(_jaccard, ts_a, ts_b): (a, b) 
-                    for a, b, ts_a, ts_b in pairs
-                }
-                for future in as_completed(future_to_pair):
-                    a, b = future_to_pair[future]
-                    s = future.result()
-                    sims[a][b] = s
-                    sims[b][a] = s
-        else:
-            # Sequential for small model counts (avoids thread overhead)
-            for i, a in enumerate(models):
-                for b in models[i + 1 :]:
-                    s = _jaccard(token_sets[a], token_sets[b])
-                    sims[a][b] = s
-                    sims[b][a] = s
 
         def sim(a: str, b: str) -> float:
             if a == b:
@@ -323,7 +351,6 @@ class VotingEngine:
         consensus_cluster = max(clusters, key=cluster_weight)
         confidence = cluster_weight(consensus_cluster) / total_weight if total_weight else 0.0
 
-        # Anchor = highest-weight, longest-response member of the consensus cluster.
         anchor = max(consensus_cluster, key=lambda m: (weight(m), len(responses[m])))
         out_cluster = [m for m, _ in valid_items if m not in consensus_cluster]
 
@@ -335,24 +362,24 @@ class VotingEngine:
             consensus_text = responses[anchor]
             disputed = "\n\n---\n\n".join(f"{m}: {responses[m]}" for m in out_cluster) if out_cluster else ""
 
-        agents_out_text: List[Dict[str, Any]] = []
+        agents_out: List[Dict[str, Any]] = []
         for m, t in valid_items:
             if disputed_flag:
                 vote = "minority" if m in consensus_cluster else "dissent"
+            elif m == anchor:
+                vote = "anchor"
+            elif m in consensus_cluster:
+                vote = "consensus"
             else:
-                if m == anchor:
-                    vote = "anchor"
-                elif m in consensus_cluster:
-                    vote = "consensus"
-                else:
-                    vote = "dissent"
-            agents_out_text.append({"model": m, "response": t, "vote": vote})
-        agents_out_text.extend(error_agents)
+                vote = "dissent"
+            agents_out.append({"model": m, "response": t, "vote": vote})
+        agents_out.extend(error_agents)
 
         return {
             "consensus": consensus_text,
             "confidence": round(confidence, 3),
             "disputed": disputed,
             "disputed_flag": disputed_flag,
-            "agents": agents_out_text,
+            "agents": agents_out,
+            "similarity_method": method,
         }
