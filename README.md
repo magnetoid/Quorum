@@ -1,251 +1,158 @@
-# Quorum
+# Quorum 🛡️
 
-> One question. A council of models. A single answer. Disagreement made visible.
+> **Disagreement made visible. Consensus made reliable.**
 
-Quorum is a consensus reasoning platform that orchestrates multiple LLMs, measures agreement, detects disagreement, learns from feedback, and exposes the result through REST, OpenAI-compatible APIs, GraphQL, MCP, CLI, and streaming interfaces.
+Quorum is a professional-grade **consensus reasoning platform** that orchestrates councils of Large Language Models (LLMs) to solve the "hallucination problem." Instead of trusting a single AI, Quorum asks a council, measures agreement, detects contradictions, and learns which models are experts in specific domains.
 
-## Why Quorum?
+---
 
-Most AI frameworks orchestrate agents.
+## 🚀 Why Quorum?
 
-Quorum evaluates them.
+Most AI frameworks orchestrate agents. **Quorum evaluates them.**
 
-Instead of asking one model and hoping it's correct, Quorum asks a council of models, clusters responses, measures confidence, surfaces disagreement, and continuously improves model reputation by domain.
+- **The Problem:** Single LLMs often provide confident but incorrect answers (hallucinations).
+- **The Solution:** Quorum uses a multi-tier, multi-model approach with a weighted voting engine. It surfaces disagreement as a "Disputed Zone," ensuring you never unknowingly rely on a minority opinion.
 
-## Core Features
+### Who is this for?
+- **Enterprise decision-makers** who need reliable AI-generated reports.
+- **Developers** building safety-critical AI applications (Legal, Finance, Healthcare).
+- **Researchers** evaluating model performance across different domains.
+- **Power users** who want the "best possible answer" by combining the strengths of GPT-4, Claude, Gemini, and local models.
 
-### Consensus Engine
-- Multi-model parallel execution
-- Reputation-weighted voting
-- Canonical answer detection (Yes/No, A/B/C/D, numeric)
-- Semantic consensus using embeddings
-- Lexical fallback voting
-- Disputed-zone detection
-- Confidence scoring
-- Domain-aware councils
+---
 
-### AI Infrastructure
-- REST API
-- OpenAI-compatible API
-- GraphQL API
-- MCP Server (SSE)
-- MCP stdio transport
-- CLI interface
-- Streaming responses (SSE)
+## ✨ Core Features
 
-### Reliability
-- Provider retries
-- Exponential backoff
-- Provider failure isolation
-- Shared HTTP connection pools
-- Budget-aware execution
-- Graceful degradation
+### 🏛️ Advanced Consensus Engine
+- **Speculative Tiered Execution:** Automatically starts higher-tier models (Premium) if lower tiers (Local/Cheap) are too slow or fail to reach consensus.
+- **Domain-Aware Adaptive Thresholds:** Stricter agreement requirements for `code` and `logic`; higher tolerance for `creative` and `prose`.
+- **Hybrid Semantic Voting:** Combines lexical (Jaccard) similarity with high-dimensional semantic embeddings.
+- **Remote Embedding Fallbacks:** Automatically uses OpenAI embeddings if local hardware acceleration isn't available.
 
-### Intelligence Layer
-- Semantic voting
-- Embedding clustering
-- Contradiction protection
-- Reputation learning
-- Domain classification
-- Tier escalation
+### 📈 Intelligence & Reliability
+- **Non-Linear Reputation Learning:** Models gain or lose reputation based on performance. Premium models are penalized more heavily for "confident hallucinations."
+- **Latency Tracking:** Measures and reports execution time per agent to identify bottlenecks.
+- **Disputed Zone Detection:** Explicitly flags when models disagree, providing a "Dissenting Opinion" summary.
+- **Budget-Aware Routing:** Stops execution once a specified cost limit is reached or consensus is met.
 
-### Performance
-- Persistent Async HTTP clients
-- Optional Redis cache
-- Response caching
-- Parallel execution
-- Connection pooling
+### 🔌 Enterprise Infrastructure
+- **OpenAI-Compatible API:** Drop-in replacement for any OpenAI-compatible client.
+- **REST & GraphQL APIs:** Fully typed interfaces for modern web applications.
+- **MCP Server (Model Context Protocol):** Native support for Claude Desktop and other MCP-enabled tools.
+- **Interactive CLI:** A powerful command-line tool for local reasoning and system management.
 
-## Architecture
+---
 
-```text
-                    Applications
+## 🛠️ Installation
 
-      Open WebUI   LibreChat   LangChain   Custom Apps
-             \         |          |          /
-              \        |          |         /
+### 1. Requirements
+- Python 3.11+
+- (Optional) Redis for caching.
+- (Optional) `sentence-transformers` for local semantic voting.
 
-                 REST / OpenAI / GraphQL
-                            |
-                            v
-                     +-------------+
-                     |   Quorum    |
-                     +-------------+
-                            |
-        +-------------------+-------------------+
-        |                   |                   |
-        v                   v                   v
-     Voting            Reputation          Router
-     Engine             Engine             Engine
-        |                   |                   |
-        +-------------------+-------------------+
-                            |
-               +------------+------------+
-               |                         |
-               v                         v
-          Redis Cache              SQLite History
-               |                         |
-               +------------+------------+
-                            |
-                            v
-                     Provider Layer
-                            |
-      OpenAI  Claude  Gemini  Ollama  Groq  DeepSeek
-```
-
-## Supported Interfaces
-
-### REST
-
+### 2. Basic Setup
 ```bash
-POST /api/ask
+git clone https://github.com/magnetoid/Quorum.git
+cd Quorum
+pip install -e .
 ```
 
-### OpenAI Compatible
-
+### 3. Full Installation (Recommended)
+Includes semantic voting and development tools:
 ```bash
-POST /v1/chat/completions
+pip install -e ".[dev,semantic]"
 ```
 
-Supports:
+---
 
-```json
-{
-  "model": "quorum",
-  "stream": true
-}
-```
+## ⚙️ Configuration
 
-### GraphQL
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. Add your API keys:
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `GEMINI_API_KEY`
+   - ... (see `.env.example` for all supported providers)
 
-```graphql
-mutation {
-  ask(
-    prompt: "Explain vector databases"
-    domain: "architecture"
-  ) {
-    consensus
-    confidence
-    disputedFlag
-  }
-}
-```
+3. Configure your council in `config.yaml`:
+   ```yaml
+   tiers:
+     local:
+       models: ["ollama/llama3.2", "ollama/mistral"]
+       confidence_threshold: 0.7
+     premium:
+       models: ["gpt-4o", "claude-3-5-sonnet-20241022"]
+       confidence_threshold: 0.8
+   ```
 
-### MCP
+---
 
-Tools:
+## 📖 How to Use
 
-- quorum_ask
-- quorum_council
-- quorum_history
-- quorum_model_stats
-
-## Semantic Voting
-
-Quorum now supports hybrid semantic consensus.
-
+### Command Line Interface (CLI)
+Ask a question and see the council's reasoning:
 ```bash
-pip install "quorum[semantic]"
+# Basic usage
+quorum ask "Is it safe to use Python's multiprocessing with SQLite?"
+
+# Specify a domain for specialized thresholds
+quorum ask "Optimize this SQL query: SELECT * FROM users..." --domain code
+
+# Set a strict budget
+quorum ask "Explain quantum entanglement." --budget 0.02
 ```
 
+### REST API
 ```bash
-QUORUM_SEMANTIC_VOTING=auto
-QUORUM_SEMANTIC_MODEL=all-MiniLM-L6-v2
-QUORUM_SEMANTIC_WEIGHT=0.7
+curl -X POST http://localhost:8000/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What is the capital of France?", "domain": "factual"}'
 ```
 
-Voting pipeline:
-
-1. Canonical answer detection
-2. Semantic embeddings
-3. Cosine similarity clustering
-4. Lexical fallback
-5. Consensus generation
-
-## Redis Cache
-
+### OpenAI-Compatible API (with custom budget)
+Quorum supports an extra header to control the consensus budget:
 ```bash
-REDIS_URL=redis://localhost:6379/0
-QUORUM_CACHE_TTL_SECONDS=3600
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer $QUORUM_API_KEY" \
+  -H "X-Quorum-Budget: 0.10" \
+  -d '{
+    "model": "quorum",
+    "messages": [{"role": "user", "content": "How do I fix a race condition?"}]
+  }'
 ```
 
-Benefits:
+---
 
-- Faster responses
-- Reduced API costs
-- Lower latency
-- Provider load reduction
+## 🔍 Problems Quorum Solves
 
-## Production Features
+| Problem | Quorum's Solution |
+| :--- | :--- |
+| **Hallucinations** | Cross-references multiple models and flags disagreements. |
+| **Inconsistency** | Uses reputation-weighted voting to favor historically accurate models. |
+| **High Costs** | Uses a "Local First" tiered strategy, only hitting expensive APIs if needed. |
+| **Vendor Lock-in** | Orchestrates OpenAI, Anthropic, Gemini, Ollama, and more in one unified layer. |
+| **Lack of Transparency** | Provides full telemetry (cost, latency, token usage) for every council member. |
 
-### Security
+---
 
-```bash
-QUORUM_API_KEY=secret
-```
+## 🛣️ Roadmap
 
-Supports:
+- [x] Speculative Tiered Execution
+- [x] Remote Embedding Fallbacks
+- [x] Domain-Aware Adaptive Thresholds
+- [ ] Redis-backed Semantic Cache
+- [ ] Real-time "Deliberation Round" (Models critiquing each other)
+- [ ] Prometheus/Grafana Dashboard
 
-- Authorization: Bearer
-- X-Quorum-Key
+---
 
-### CORS
+## 📄 License
+Quorum is released under the **Apache-2.0 License**. See [LICENSE](LICENSE) for details.
 
-```bash
-QUORUM_ALLOWED_ORIGINS=https://app.example.com
-```
+---
 
-### Provider Resilience
-
-```bash
-QUORUM_PROVIDER_RETRIES=2
-QUORUM_PROVIDER_TIMEOUT=60
-QUORUM_PROVIDER_BACKOFF_BASE=0.5
-```
-
-## Current Platform Status
-
-| Capability | Status |
-|------------|---------|
-| REST API | ✅ |
-| OpenAI Compatible API | ✅ |
-| GraphQL API | ✅ |
-| MCP SSE | ✅ |
-| MCP stdio | ✅ |
-| Streaming | ✅ |
-| Semantic Voting | ✅ |
-| Reputation Learning | ✅ |
-| Redis Cache Foundation | ✅ |
-| Provider Retry Logic | ✅ |
-| Connection Pooling | ✅ |
-| Multi-Provider Councils | ✅ |
-
-## Roadmap
-
-### Near Term
-- Redis integration into engine
-- Semantic cache
-- Contradiction detector
-- Prometheus metrics
-- OpenTelemetry tracing
-
-### Advanced
-- Tool-calling councils
-- RAG memory layer
-- Distributed execution
-- Kubernetes deployment
-- Multi-node councils
-
-## Vision
-
-Quorum is evolving from a consensus engine into a complete AI decision layer:
-
-- AI Gateway
-- Consensus Engine
-- MCP Server
-- GraphQL Service
-- Multi-Agent Platform
-- Model Evaluation Layer
-- AI Infrastructure Backbone
-
-Instead of choosing one model, Quorum lets organizations trust a council.
+## 🤝 Contributing
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to help improve Quorum.
