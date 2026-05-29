@@ -12,7 +12,7 @@ from .base import AdapterResponse, BaseAdapter
 from config import AppConfig
 
 
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 class GeminiAdapter(BaseAdapter):
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"

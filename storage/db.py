@@ -55,7 +55,7 @@ class DB:
             ) as cursor:
                 return {row[0]: row[1] async for row in cursor}
 
-    async def update_reputation(self, model: str, domain: str, score: float):
+    async def update_reputation(self, model: str, domain: str, delta: float):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """
@@ -63,7 +63,7 @@ class DB:
                 VALUES (?, ?, ?)
                 ON CONFLICT(model, domain) DO UPDATE SET score = score + ?
                 """,
-                (model, domain, score, score),
+                (model, domain, delta, delta),
             )
             await db.commit()
 
@@ -146,14 +146,7 @@ class DB:
             if score != 0.0:
                 for model, domain, delta in pending:
                     scaled = delta * score
-                    await db.execute(
-                        """
-                        INSERT INTO reputation (model, domain, score)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(model, domain) DO UPDATE SET score = score + ?
-                        """,
-                        (model, domain, scaled, scaled),
-                    )
+                    await self.update_reputation(model, domain, scaled)
             await db.execute(
                 "DELETE FROM pending_outcomes WHERE query_id = ?", (query_id,)
             )

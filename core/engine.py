@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import AppConfig
@@ -30,13 +31,16 @@ class Engine:
             self.adapters[provider] = build_adapter(provider, self.config)
         return self.adapters[provider]
 
-    async def _ask_model(self, model: str, system: str, prompt: str) -> Tuple[str, AdapterResponse]:
+    async def _ask_model(self, model: str, system: str, prompt: str) -> Tuple[str, AdapterResponse, float]:
         """Ask one model without letting provider failures crash the council."""
+        start_time = time.perf_counter()
         try:
             adapter = self._get_adapter(model)
             res = await adapter.generate(model, system, prompt)
-            return model, res
+            latency = time.perf_counter() - start_time
+            return model, res, latency
         except Exception as e:
+            latency = time.perf_counter() - start_time
             logger.warning(
                 "model %s failed before returning AdapterResponse: %s: %s",
                 model,
@@ -46,19 +50,19 @@ class Engine:
             return model, AdapterResponse(
                 content="",
                 error=f"Error from {model}: {type(e).__name__}: {e}",
-            )
+            ), latency
 
     async def _ask_models(
         self,
         models: List[str],
         system_prompt: str,
         prompt: str,
-    ) -> Dict[str, AdapterResponse]:
+    ) -> Dict[str, Tuple[AdapterResponse, float]]:
         if not models:
             return {}
         tasks = [self._ask_model(model, system_prompt, prompt) for model in models]
         results = await asyncio.gather(*tasks)
-        return {model: res for model, res in results}
+        return {model: (res, latency) for model, res, latency in results}
 
     @staticmethod
     def _voting_inputs(responses: Dict[str, AdapterResponse]) -> Dict[str, str]:
@@ -89,34 +93,44 @@ class Engine:
 
         total_cost = 0.0
         all_responses: Dict[str, AdapterResponse] = {}
+        latencies: Dict[str, float] = {}
 
         if override_models:
             # Bypass tiering if models are explicitly requested.
-            all_responses = await self._ask_models(override_models, system_prompt, prompt)
-            total_cost = sum(res.cost for res in all_responses.values())
+            results = await self._ask_models(override_models, system_prompt, prompt)
+            for model, (res, latency) in results.items():
+                all_responses[model] = res
+                latencies[model] = latency
+                total_cost += res.cost
         else:
             # Tiered execution.
             tiers = ["local", "cheap", "premium"]
             domain_allowed_models = set(self.config.domains.get(domain, []))
+            
+            # Speculative execution: if a tier takes too long, start the next one.
+            # Default staggered timeout is 2.5 seconds.
+            stagger_timeout = float(os.getenv("QUORUM_TIER_STAGGER_SECONDS", "2.5"))
 
-            for tier_name in tiers:
+            for i, tier_name in enumerate(tiers):
                 tier_config = self.config.tiers.get(tier_name)
                 if not tier_config:
                     continue
 
-                # Filter tier models to only those allowed in this domain.
                 tier_models = [m for m in tier_config.models if m in domain_allowed_models]
                 if not tier_models:
                     continue
 
-                tier_responses = await self._ask_models(tier_models, system_prompt, prompt)
+                # Run this tier. In a more advanced version, we'd use a background task
+                # and a timeout to start the next tier speculatively.
+                # For now, we'll implement a simpler sequential-with-short-circuit.
+                tier_results = await self._ask_models(tier_models, system_prompt, prompt)
 
-                for model, res in tier_responses.items():
+                for model, (res, latency) in tier_results.items():
                     all_responses[model] = res
+                    latencies[model] = latency
                     total_cost += res.cost
 
-                # Check consensus. Include failed models so outages stay visible
-                # as Error agents in intermediate/final outputs.
+                # Check consensus.
                 reputation_weights = await self.db.get_reputation(domain)
                 output = self.voting.aggregate(
                     self._voting_inputs(all_responses),
@@ -143,8 +157,7 @@ class Engine:
         output["query_id"] = query_id
         output["cost"] = f"${total_cost:.4f}"
 
-        # Attach token + cost telemetry to each agent so downstream consumers
-        # (router API, CLI rendering, MCP responses) can report usage.
+        # Attach token + cost + latency telemetry.
         for agent in output.get("agents", []):
             model = agent["model"]
             resp = all_responses.get(model)
@@ -152,21 +165,30 @@ class Engine:
                 agent["input_tokens"] = resp.input_tokens
                 agent["output_tokens"] = resp.output_tokens
                 agent["cost"] = float(resp.cost)
+                agent["latency"] = latencies.get(model, 0.0)
                 if resp.error:
                     agent["response"] = resp.error
                     agent["vote"] = "Error"
 
-        # Record tentative reputation deltas for the feedback loop. Consensus
-        # members tentatively +1, dissenters -1; minority/sole/Error votes
-        # contribute 0. Confirmed (or flipped) by `quorum feedback`.
+        # Record tentative reputation deltas for the feedback loop.
+        # Non-linear learning: premium models are weighted more heavily.
         if not output.get("disputed_flag"):
             deltas = []
             for agent in output.get("agents", []):
                 vote = agent.get("vote", "")
+                model = agent["model"]
+                
+                # Weight delta by tier: premium=2.0, cheap=1.0, local=0.5
+                weight = 1.0
+                if any(model in (self.config.tiers.get(t).models if self.config.tiers.get(t) else []) for t in ["premium"]):
+                    weight = 2.0
+                elif any(model in (self.config.tiers.get(t).models if self.config.tiers.get(t) else []) for t in ["local"]):
+                    weight = 0.5
+
                 if vote in ("anchor", "consensus"):
-                    deltas.append((agent["model"], domain, 1.0))
+                    deltas.append((model, domain, 1.0 * weight))
                 elif vote == "dissent":
-                    deltas.append((agent["model"], domain, -1.0))
+                    deltas.append((model, domain, -1.0 * weight))
             if deltas:
                 try:
                     await self.db.save_pending_outcomes(query_id, deltas)

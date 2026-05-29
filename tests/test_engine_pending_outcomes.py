@@ -22,9 +22,8 @@ async def test_engine_does_not_record_pending_outcomes_when_disputed(tmp_path):
 
     async def fake_ask(model: str, system: str, prompt: str):
         if model.endswith("/a"):
-            return (model, AdapterResponse(content="apple", cost=0.0))
-        return (model, AdapterResponse(content="banana", cost=0.0))
-
+            return (model, AdapterResponse(content="apple", cost=0.0), 0.1)
+        return (model, AdapterResponse(content="banana", cost=0.0), 0.1)
     engine._ask_model = fake_ask  # type: ignore[method-assign]
 
     result = await engine.run(

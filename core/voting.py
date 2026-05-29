@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import re
+import httpx
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -141,21 +142,46 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return max(0.0, min(1.0, (_dot(a, b) / denom + 1.0) / 2.0))
 
 
+def _remote_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
+    """Fallback to OpenAI embeddings if local model is unavailable."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "input": texts,
+                    "model": os.getenv("QUORUM_REMOTE_EMBEDDING_MODEL", "text-embedding-3-small"),
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return [v["embedding"] for v in data["data"]]
+    except Exception as e:
+        logger.warning("Remote embedding fallback failed: %s", e)
+        return None
+
+
 def _semantic_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
     mode = os.getenv("QUORUM_SEMANTIC_VOTING", "auto").lower().strip()
     if mode in {"0", "false", "off", "disabled"}:
         return None
+    
+    # Try local first
     model = _semantic_model()
-    if model is None:
-        if mode == "on":
-            logger.warning("QUORUM_SEMANTIC_VOTING=on but semantic model is unavailable")
-        return None
-    try:
-        vectors = model.encode(texts, normalize_embeddings=True)
-        return [list(map(float, v)) for v in vectors]
-    except Exception as e:
-        logger.warning("Semantic embedding failed; falling back to lexical voting: %s", e)
-        return None
+    if model is not None:
+        try:
+            vectors = model.encode(texts, normalize_embeddings=True)
+            return [list(map(float, v)) for v in vectors]
+        except Exception as e:
+            logger.warning("Local semantic embedding failed, trying remote: %s", e)
+
+    # Fallback to remote
+    return _remote_embeddings(texts)
 
 
 def _build_similarity_matrix(valid_items: List[tuple[str, str]]) -> tuple[Dict[str, Dict[str, float]], str]:
@@ -174,6 +200,7 @@ def _build_similarity_matrix(valid_items: List[tuple[str, str]]) -> tuple[Dict[s
         for j, b in enumerate(models[i + 1 :], start=i + 1):
             lexical = _jaccard(token_sets[a], token_sets[b])
             if method == "hybrid-semantic":
+                assert embeddings is not None
                 semantic = _cosine(embeddings[i], embeddings[j])
                 score = semantic_weight * semantic + (1.0 - semantic_weight) * lexical
                 # Preserve the existing negation safety: if one answer is negated
@@ -218,6 +245,17 @@ class VotingEngine:
             }
 
         reputation_weights = reputation_weights or {}
+        
+        # Domain-aware thresholds
+        # Stricter for code/logic, more relaxed for creative/default.
+        cluster_threshold = self.cluster_threshold
+        dispute_confidence = self.dispute_confidence
+        if domain == "code":
+            cluster_threshold = 0.4  # Need higher lexical/semantic overlap
+            dispute_confidence = 0.75 # Require more agreement to avoid dispute
+        elif domain in ("creative", "prose"):
+            cluster_threshold = 0.15 # Allow more variation
+            dispute_confidence = 0.5  # Lower bar for consensus
 
         valid_items: List[tuple[str, str]] = []
         error_agents: List[Dict[str, Any]] = []
@@ -270,7 +308,7 @@ class VotingEngine:
                 label_conf = cluster_weight(consensus_cluster) / total_weight if total_weight else 0.0
                 anchor = max(consensus_cluster, key=lambda m: (weight(m), len(responses[m])))
                 out_cluster = [m for m, _ in valid_items if m not in consensus_cluster]
-                disputed_flag = bool(out_cluster) and label_conf < self.dispute_confidence
+                disputed_flag = bool(out_cluster) and label_conf < dispute_confidence
 
                 if disputed_flag:
                     consensus_text = "Models disagreed."
@@ -331,17 +369,17 @@ class VotingEngine:
                 return (weight(m), avg, len(responses[m]))
 
             anchor = max(unassigned, key=anchor_key)
-            cluster = [anchor] + [m for m in unassigned if m != anchor and sim(anchor, m) >= self.cluster_threshold]
+            cluster = [anchor] + [m for m in unassigned if m != anchor and sim(anchor, m) >= cluster_threshold]
             if len(cluster) >= 3:
                 pruned = [anchor]
                 for m in cluster:
                     if m == anchor:
                         continue
-                    if any(sim(m, o) >= self.cluster_threshold for o in cluster if o not in (m, anchor)):
+                    if any(sim(m, o) >= cluster_threshold for o in cluster if o not in (m, anchor)):
                         pruned.append(m)
-                if len(pruned) >= 2 and cohesion(pruned) >= self.cluster_threshold:
+                if len(pruned) >= 2 and cohesion(pruned) >= cluster_threshold:
                     cluster = pruned
-                elif cohesion(cluster) < self.cluster_threshold:
+                elif cohesion(cluster) < cluster_threshold:
                     cluster = [anchor]
             clusters.append(cluster)
             for m in cluster:
@@ -354,7 +392,7 @@ class VotingEngine:
         anchor = max(consensus_cluster, key=lambda m: (weight(m), len(responses[m])))
         out_cluster = [m for m, _ in valid_items if m not in consensus_cluster]
 
-        disputed_flag = bool(out_cluster) and confidence < self.dispute_confidence
+        disputed_flag = bool(out_cluster) and confidence < dispute_confidence
         if disputed_flag:
             consensus_text = "Models disagreed."
             disputed = "\n\n---\n\n".join(f"{m}: {responses[m]}" for m, _ in valid_items)
@@ -362,7 +400,7 @@ class VotingEngine:
             consensus_text = responses[anchor]
             disputed = "\n\n---\n\n".join(f"{m}: {responses[m]}" for m in out_cluster) if out_cluster else ""
 
-        agents_out: List[Dict[str, Any]] = []
+        agents_out_v: List[Dict[str, Any]] = []
         for m, t in valid_items:
             if disputed_flag:
                 vote = "minority" if m in consensus_cluster else "dissent"
@@ -372,14 +410,14 @@ class VotingEngine:
                 vote = "consensus"
             else:
                 vote = "dissent"
-            agents_out.append({"model": m, "response": t, "vote": vote})
-        agents_out.extend(error_agents)
+            agents_out_v.append({"model": m, "response": t, "vote": vote})
+        agents_out_v.extend(error_agents)
 
         return {
             "consensus": consensus_text,
             "confidence": round(confidence, 3),
             "disputed": disputed,
             "disputed_flag": disputed_flag,
-            "agents": agents_out,
+            "agents": agents_out_v,
             "similarity_method": method,
         }

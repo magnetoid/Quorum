@@ -1,6 +1,6 @@
 """Performance benchmarks for VotingEngine to measure time and memory usage."""
 import time
-import memory_profiler
+import memory_profiler  # type: ignore
 from typing import Dict, List
 from core.voting import VotingEngine
 import json

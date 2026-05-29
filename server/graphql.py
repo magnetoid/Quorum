@@ -8,7 +8,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import strawberry
+from fastapi import Request
 from strawberry.fastapi import GraphQLRouter
+from strawberry.types import Info
 
 from core.engine import Engine
 from storage.db import DB
@@ -104,11 +106,11 @@ async def _run_and_save(
 @strawberry.type
 class Query:
     @strawberry.field
-    async def health(self, info) -> str:
+    async def health(self, info: Info) -> str:
         return "ok"
 
     @strawberry.field
-    async def history(self, info, limit: int = 20) -> List[HistoryItem]:
+    async def history(self, info: Info, limit: int = 20) -> List[HistoryItem]:
         db: DB = info.context["db"]
         rows = await db.get_history(limit=limit)
         return [
@@ -124,7 +126,7 @@ class Query:
         ]
 
     @strawberry.field
-    async def model_scores(self, info, domain: str = "default") -> List[ModelScore]:
+    async def model_scores(self, info: Info, domain: str = "default") -> List[ModelScore]:
         db: DB = info.context["db"]
         scores = await db.get_reputation(domain)
         return [
@@ -138,7 +140,7 @@ class Mutation:
     @strawberry.mutation
     async def ask(
         self,
-        info,
+        info: Info,
         prompt: str,
         domain: str = "default",
         budget: float = 0.05,
@@ -161,7 +163,7 @@ schema = strawberry.Schema(query=Query, mutation=Mutation)
 
 
 def graphql_app(engine: Engine, db: DB) -> GraphQLRouter:
-    async def get_context() -> Dict[str, Any]:
+    def get_context(request: Request) -> Dict[str, Any]:
         return {"engine": engine, "db": db}
 
-    return GraphQLRouter(schema, context_getter=get_context)
+    return GraphQLRouter(schema, context_getter=get_context)  # type: ignore
