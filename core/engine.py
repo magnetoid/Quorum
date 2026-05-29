@@ -2,6 +2,7 @@ import asyncio
 import logging
 import uuid
 import time
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import AppConfig
@@ -111,6 +112,8 @@ class Engine:
             # Default staggered timeout is 2.5 seconds.
             stagger_timeout = float(os.getenv("QUORUM_TIER_STAGGER_SECONDS", "2.5"))
 
+            running_tasks: List[asyncio.Task] = []
+            
             for i, tier_name in enumerate(tiers):
                 tier_config = self.config.tiers.get(tier_name)
                 if not tier_config:
@@ -120,29 +123,51 @@ class Engine:
                 if not tier_models:
                     continue
 
-                # Run this tier. In a more advanced version, we'd use a background task
-                # and a timeout to start the next tier speculatively.
-                # For now, we'll implement a simpler sequential-with-short-circuit.
-                tier_results = await self._ask_models(tier_models, system_prompt, prompt)
+                # Start this tier's models as a background task
+                task = asyncio.create_task(self._ask_models(tier_models, system_prompt, prompt))
+                running_tasks.append(task)
 
-                for model, (res, latency) in tier_results.items():
-                    all_responses[model] = res
-                    latencies[model] = latency
-                    total_cost += res.cost
+                # Wait for the current tier or others to finish, but speculate if it takes too long
+                try:
+                    await asyncio.wait(running_tasks, timeout=stagger_timeout, return_when=asyncio.FIRST_COMPLETED)
+                except asyncio.TimeoutError:
+                    pass
 
-                # Check consensus.
-                reputation_weights = await self.db.get_reputation(domain)
-                output = self.voting.aggregate(
-                    self._voting_inputs(all_responses),
-                    domain,
-                    reputation_weights,
-                )
+                # Harvest any completed tasks
+                for t in running_tasks[:]:
+                    if t.done():
+                        tier_results = t.result()
+                        for model, (res, latency) in tier_results.items():
+                            if model not in all_responses:
+                                all_responses[model] = res
+                                latencies[model] = latency
+                                total_cost += res.cost
+                        running_tasks.remove(t)
 
-                if output["confidence"] >= tier_config.confidence_threshold:
-                    break
+                # Check consensus after every harvest
+                if all_responses:
+                    reputation_weights = await self.db.get_reputation(domain)
+                    output = self.voting.aggregate(
+                        self._voting_inputs(all_responses),
+                        domain,
+                        reputation_weights,
+                    )
+
+                    if output["confidence"] >= tier_config.confidence_threshold:
+                        break
 
                 if total_cost >= budget:
                     break
+            
+            # Final harvest of remaining tasks if we haven't reached consensus
+            if running_tasks:
+                results_list = await asyncio.gather(*running_tasks)
+                for tier_results in results_list:
+                    for model, (res, latency) in tier_results.items():
+                        if model not in all_responses:
+                            all_responses[model] = res
+                            latencies[model] = latency
+                            total_cost += res.cost
 
         # Final aggregation.
         reputation_weights = await self.db.get_reputation(domain)
@@ -180,9 +205,11 @@ class Engine:
                 
                 # Weight delta by tier: premium=2.0, cheap=1.0, local=0.5
                 weight = 1.0
-                if any(model in (self.config.tiers.get(t).models if self.config.tiers.get(t) else []) for t in ["premium"]):
+                premium_tier = self.config.tiers.get("premium")
+                local_tier = self.config.tiers.get("local")
+                if premium_tier and model in premium_tier.models:
                     weight = 2.0
-                elif any(model in (self.config.tiers.get(t).models if self.config.tiers.get(t) else []) for t in ["local"]):
+                elif local_tier and model in local_tier.models:
                     weight = 0.5
 
                 if vote in ("anchor", "consensus"):

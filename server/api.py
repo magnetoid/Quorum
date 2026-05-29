@@ -296,7 +296,10 @@ async def ask(req: AskRequest) -> Dict[str, Any]:
 
 
 @app.post("/v1/chat/completions", dependencies=[Depends(get_api_key)])
-async def chat_completions(req: ChatCompletionRequest):
+async def chat_completions(
+    req: ChatCompletionRequest,
+    x_quorum_budget: Optional[float] = Header(None, alias="X-Quorum-Budget"),
+):
     """OpenAI-compatible chat-completions router.
 
     Supports normal JSON responses and OpenAI-style SSE when `stream=true`.
@@ -314,7 +317,7 @@ async def chat_completions(req: ChatCompletionRequest):
         prompt = "\n".join(system_msgs) + "\n\n" + prompt
 
     domain, override_models = _parse_model_spec(req.model)
-    budget = 0.05  # TODO: pluggable via custom header
+    budget = x_quorum_budget if x_quorum_budget is not None else 0.05
 
     try:
         result = await _run_and_save(
