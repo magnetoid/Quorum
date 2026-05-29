@@ -252,11 +252,70 @@ def _step_pick_providers(cfg: Dict[str, Any], env: Dict[str, str]) -> None:
             )
 
 
-# ── Steps 3 & 4: persist + doctor ───────────────────────────────────────────
+# ── Step 3: Configure Council ───────────────────────────────────────────────
+
+
+def _step_configure_council(cfg: Dict[str, Any], env: Dict[str, str]) -> None:
+    _step(3, "Configure councils and tiers")
+    console.print(
+        "[dim]Quorum uses tiered execution: Local -> Cheap -> Premium. Enabled models\n"
+        "are automatically sorted into these tiers. You can override them here\n"
+        "or accept the defaults based on your enabled providers.[/dim]\n"
+    )
+
+    # Simple model list by common providers for the user to pick from if they want to override
+    SUGGESTIONS = {
+        "openai": ["gpt-4o", "gpt-4o-mini", "o1-preview", "o1-mini"],
+        "anthropic": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
+        "groq": ["groq/llama-3.3-70b-versatile", "groq/mixtral-8x7b-32768"],
+        "deepseek": ["deepseek/deepseek-chat", "deepseek/deepseek-coder"],
+        "gemini": ["gemini/gemini-1.5-pro", "gemini/gemini-1.5-flash"],
+    }
+
+    enabled_providers = [n for n, p in cfg.get("providers", {}).items() if p.get("enabled")]
+    
+    # Show current tiers
+    tiers = cfg.get("tiers", {})
+    if not tiers:
+        # Default tiers if missing
+        tiers = {
+            "local": {"models": [], "confidence_threshold": 0.7},
+            "cheap": {"models": [], "confidence_threshold": 0.8},
+            "premium": {"models": [], "confidence_threshold": 0.9},
+        }
+    
+    # Auto-populate based on enabled providers if tiers are empty
+    if not any(t.get("models") for t in tiers.values()):
+        console.print("[yellow]Auto-populating tiers based on enabled providers...[/yellow]")
+        for p in enabled_providers:
+            if p == "ollama":
+                reachable, models = _probe_ollama(env.get("OLLAMA_BASE_URL", "http://localhost:11434"))
+                if reachable and models:
+                    tiers["local"]["models"].extend(models[:2])
+            elif p in ["openai", "anthropic", "gemini"]:
+                if p in SUGGESTIONS:
+                    tiers["premium"]["models"].append(SUGGESTIONS[p][0])
+            elif p in ["groq", "deepseek", "openrouter"]:
+                if p in SUGGESTIONS:
+                    tiers["cheap"]["models"].append(SUGGESTIONS[p][0])
+        cfg["tiers"] = tiers
+
+    for tname in ["local", "cheap", "premium"]:
+        tcfg = tiers.get(tname, {})
+        models = tcfg.get("models", [])
+        console.print(f"[bold]{tname.capitalize()} Tier:[/bold] {', '.join(models) if models else '[dim]none[/dim]'}")
+        if Confirm.ask(f"  Modify {tname} models?", default=False):
+            new_models = Prompt.ask(f"  Enter comma-separated models for {tname}").split(",")
+            tiers[tname]["models"] = [m.strip() for m in new_models if m.strip()]
+            
+    cfg["tiers"] = tiers
+
+
+# ── Step 4 & 5: persist + doctor ───────────────────────────────────────────
 
 
 def _step_persist(cfg: Dict[str, Any], env: Dict[str, str]) -> None:
-    _step(3, "Persist configuration")
+    _step(4, "Persist configuration")
     env.setdefault("QUORUM_CONFIG", "./config.yaml")
     env.setdefault("QUORUM_DB_PATH", "./quorum.db")
     _write_env_file(ENV_PATH, env)
@@ -266,12 +325,47 @@ def _step_persist(cfg: Dict[str, Any], env: Dict[str, str]) -> None:
 
 
 def _step_doctor(env: Dict[str, str]) -> int:
-    _step(4, "Health check")
+    _step(5, "Health check")
     for k, v in env.items():
         if v:
             os.environ[k] = v
     from cli.doctor import run_doctor
     return run_doctor()
+
+
+# ── Step 6: Background Service (MCP) ────────────────────────────────────────
+
+
+def _step_background_service() -> None:
+    _step(6, "Background Service (MCP)")
+    if not Confirm.ask("Would you like to see instructions for running Quorum in the background (MCP)?", default=True):
+        return
+
+    is_mac = os.uname().sysname == "Darwin"
+    cwd = os.getcwd()
+    venv_python = f"{cwd}/.venv/bin/python"
+    quorum_bin = f"{cwd}/.venv/bin/quorum"
+
+    if is_mac:
+        console.print(Panel(
+            f"[bold]To run Quorum as a background service on macOS (LaunchAgent):[/bold]\n\n"
+            f"1. Create [cyan]~/Library/LaunchAgents/com.quorum.mcp.plist[/cyan] with:\n"
+            f"[dim]... (plist content using {quorum_bin} mcp) ...[/dim]\n"
+            f"2. Run: [cyan]launchctl load ~/Library/LaunchAgents/com.quorum.mcp.plist[/cyan]\n\n"
+            f"[bold]Or for Claude Desktop, add to your config:[/bold]\n"
+            f"\"quorum\": {{ \"command\": \"{quorum_bin}\", \"args\": [\"mcp\"] }}",
+            title="macOS Setup",
+            border_style="blue"
+        ))
+    else:
+        console.print(Panel(
+            f"[bold]To run Quorum as a background service on Linux (systemd):[/bold]\n\n"
+            f"1. Create [cyan]/etc/systemd/system/quorum.service[/cyan] with:\n"
+            f"[dim][Service]\nExecStart={quorum_bin} mcp\nUser={os.getlogin()}[/dim]\n"
+            f"2. Run: [cyan]sudo systemctl enable --now quorum[/cyan]",
+            title="Linux Setup",
+            border_style="blue"
+        ))
 
 
 # ── Entry points ────────────────────────────────────────────────────────────
@@ -285,8 +379,10 @@ def run_setup() -> int:
 
     _step_ollama(env)
     _step_pick_providers(cfg, env)
+    _step_configure_council(cfg, env)
     _step_persist(cfg, env)
     code = _step_doctor(env)
+    _step_background_service()
 
     console.print()
     if code == 0:
