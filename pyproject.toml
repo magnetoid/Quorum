@@ -22,6 +22,7 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "strawberry-graphql[fastapi]>=0.235",
+    "prometheus-client>=0.22",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +45,7 @@ py-modules = ["config", "main"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "adapters*", "server*", "storage*", "cli*"]
+include = ["core*", "adapters*", "server*", "storage*", "cli*", "observability*"]
 
 [tool.ruff]
 line-length = 100
