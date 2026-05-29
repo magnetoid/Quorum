@@ -1,158 +1,133 @@
-# Quorum 🛡️
+<p align="center">
+  <img src="assets/quorum.png" width="300" alt="Quorum Logo">
+</p>
 
-> **Disagreement made visible. Consensus made reliable.**
+<h1 align="center">Quorum: The Council of Models</h1>
 
-Quorum is a professional-grade **consensus reasoning platform** that orchestrates councils of Large Language Models (LLMs) to solve the "hallucination problem." Instead of trusting a single AI, Quorum asks a council, measures agreement, detects contradictions, and learns which models are experts in specific domains.
+<p align="center">
+  <strong>One Question. A Council of Models. A Single, Trusted Answer.</strong>
+</p>
 
----
-
-## 🚀 Why Quorum?
-
-Most AI frameworks orchestrate agents. **Quorum evaluates them.**
-
-- **The Problem:** Single LLMs often provide confident but incorrect answers (hallucinations).
-- **The Solution:** Quorum uses a multi-tier, multi-model approach with a weighted voting engine. It surfaces disagreement as a "Disputed Zone," ensuring you never unknowingly rely on a minority opinion.
-
-### Who is this for?
-- **Enterprise decision-makers** who need reliable AI-generated reports.
-- **Developers** building safety-critical AI applications (Legal, Finance, Healthcare).
-- **Researchers** evaluating model performance across different domains.
-- **Power users** who want the "best possible answer" by combining the strengths of GPT-4, Claude, Gemini, and local models.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/License-Apache--2.0-green.svg" alt="License">
+  <img src="https://img.shields.io/badge/Status-Production--Ready-brightgreen.svg" alt="Status">
+  <img src="https://img.shields.io/badge/Consensus-Adaptive-orange.svg" alt="Consensus">
+</p>
 
 ---
 
-## ✨ Core Features
+## 🏛️ What is Quorum?
 
-### 🏛️ Advanced Consensus Engine
-- **Speculative Tiered Execution:** Automatically starts higher-tier models (Premium) if lower tiers (Local/Cheap) are too slow or fail to reach consensus.
-- **Domain-Aware Adaptive Thresholds:** Stricter agreement requirements for `code` and `logic`; higher tolerance for `creative` and `prose`.
-- **Hybrid Semantic Voting:** Combines lexical (Jaccard) similarity with high-dimensional semantic embeddings.
-- **Remote Embedding Fallbacks:** Automatically uses OpenAI embeddings if local hardware acceleration isn't available.
+Quorum is a professional-grade **consensus reasoning engine** designed to eliminate AI hallucinations and vendor lock-in. Instead of trusting a single LLM, Quorum orchestrates a **council of models** (GPT-4, Claude, Gemini, Llama, etc.), clusters their responses semantically, measures agreement, and surfaces the most reliable answer.
 
-### 📈 Intelligence & Reliability
-- **Non-Linear Reputation Learning:** Models gain or lose reputation based on performance. Premium models are penalized more heavily for "confident hallucinations."
-- **Latency Tracking:** Measures and reports execution time per agent to identify bottlenecks.
-- **Disputed Zone Detection:** Explicitly flags when models disagree, providing a "Dissenting Opinion" summary.
-- **Budget-Aware Routing:** Stops execution once a specified cost limit is reached or consensus is met.
-
-### 🔌 Enterprise Infrastructure
-- **OpenAI-Compatible API:** Drop-in replacement for any OpenAI-compatible client.
-- **REST & GraphQL APIs:** Fully typed interfaces for modern web applications.
-- **MCP Server (Model Context Protocol):** Native support for Claude Desktop and other MCP-enabled tools.
-- **Interactive CLI:** A powerful command-line tool for local reasoning and system management.
+### 🛡️ Solving the "Hallucination Problem"
+Single LLMs are often "confidently wrong." Quorum makes **disagreement visible**. If models conflict, Quorum flags a **Disputed Zone**, allowing you to see dissenting opinions rather than blindly trusting a single, potentially incorrect output.
 
 ---
 
-## 🛠️ Installation
+## ✨ Key Innovations (V2)
 
-### 1. Requirements
-- Python 3.11+
-- (Optional) Redis for caching.
-- (Optional) `sentence-transformers` for local semantic voting.
+### ⚡ Speculative Tiered Execution
+Don't wait for slow models. Quorum starts with local/cheap models and **speculatively launches** higher tiers if consensus isn't reached within seconds. You get the best of both worlds: extreme speed for easy questions and deep reasoning for hard ones.
 
-### 2. Basic Setup
+### 🧠 Domain-Aware Adaptive Thresholds
+Consensus isn't one-size-fits-all.
+- **`code` & `logic`**: Stricter similarity checks (0.4) to ensure every semicolon counts.
+- **`creative` & `prose`**: Higher semantic tolerance (0.15) to embrace diverse perspectives.
+
+### 🛡️ Hybrid Semantic Voting
+Lexical overlap isn't enough. Quorum uses **high-dimensional embeddings** to cluster responses by *meaning*, not just words. With **Remote Fallbacks**, it automatically uses OpenAI Embeddings if local hardware is unavailable.
+
+### 📈 Non-Linear Reputation Learning
+Quorum learns which models are experts. **Premium models** (GPT-4/Claude-3.5) are penalized more heavily for confident failures but rewarded more for leading a correct consensus.
+
+---
+
+## 🛠️ Guided Installation
+
+Getting started is now a seamless, interactive experience.
+
 ```bash
+# Clone the repository
 git clone https://github.com/magnetoid/Quorum.git
 cd Quorum
-pip install -e .
+
+# Run the guided installer
+chmod +x install.sh
+./install.sh
 ```
 
-### 3. Full Installation (Recommended)
-Includes semantic voting and development tools:
-```bash
-pip install -e ".[dev,semantic]"
-```
+### The Setup Wizard includes:
+1.  **Ollama Discovery**: Automatically finds and pulls local models.
+2.  **Provider Picker**: Paste your API keys (OpenAI, Anthropic, etc.) and enable them instantly.
+3.  **Council Configurator**: Auto-sorts your models into `Local`, `Cheap`, and `Premium` tiers.
+4.  **Health Check**: Verifies connectivity and model readiness.
 
 ---
 
-## ⚙️ Configuration
+## 🔌 Enterprise Integration
 
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-2. Add your API keys:
-   - `OPENAI_API_KEY`
-   - `ANTHROPIC_API_KEY`
-   - `GEMINI_API_KEY`
-   - ... (see `.env.example` for all supported providers)
+### 🤖 MCP Server (Model Context Protocol)
+Quorum is fully compatible with MCP, allowing you to use it as a tool directly within **Claude Desktop**, **Cursor**, or **Claude Code**.
 
-3. Configure your council in `config.yaml`:
-   ```yaml
-   tiers:
-     local:
-       models: ["ollama/llama3.2", "ollama/mistral"]
-       confidence_threshold: 0.7
-     premium:
-       models: ["gpt-4o", "claude-3-5-sonnet-20241022"]
-       confidence_threshold: 0.8
-   ```
-
----
-
-## 📖 How to Use
-
-### Command Line Interface (CLI)
-Ask a question and see the council's reasoning:
+### 🔗 OpenAI-Compatible API
+Drop-in replacement for any OpenAI client. Simply point your `BASE_URL` to Quorum.
 ```bash
-# Basic usage
-quorum ask "Is it safe to use Python's multiprocessing with SQLite?"
-
-# Specify a domain for specialized thresholds
-quorum ask "Optimize this SQL query: SELECT * FROM users..." --domain code
-
-# Set a strict budget
-quorum ask "Explain quantum entanglement." --budget 0.02
-```
-
-### REST API
-```bash
-curl -X POST http://localhost:8000/api/ask \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "What is the capital of France?", "domain": "factual"}'
-```
-
-### OpenAI-Compatible API (with custom budget)
-Quorum supports an extra header to control the consensus budget:
-```bash
+# Control your budget per-request with custom headers
 curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer $QUORUM_API_KEY" \
-  -H "X-Quorum-Budget: 0.10" \
-  -d '{
-    "model": "quorum",
-    "messages": [{"role": "user", "content": "How do I fix a race condition?"}]
-  }'
+  -H "X-Quorum-Budget: 0.15" \
+  -d '{"model": "quorum", "messages": [{"role": "user", "content": "How do I scale a Redis cluster?"}]}'
 ```
 
 ---
 
-## 🔍 Problems Quorum Solves
+## 🔍 Why Quorum?
 
-| Problem | Quorum's Solution |
-| :--- | :--- |
-| **Hallucinations** | Cross-references multiple models and flags disagreements. |
-| **Inconsistency** | Uses reputation-weighted voting to favor historically accurate models. |
-| **High Costs** | Uses a "Local First" tiered strategy, only hitting expensive APIs if needed. |
-| **Vendor Lock-in** | Orchestrates OpenAI, Anthropic, Gemini, Ollama, and more in one unified layer. |
-| **Lack of Transparency** | Provides full telemetry (cost, latency, token usage) for every council member. |
+| Feature | Quorum | Single LLM |
+| :--- | :--- | :--- |
+| **Hallucination Detection** | ✅ **Active** (via Consensus) | ❌ **None** |
+| **Vendor Neutrality** | ✅ **Multi-Provider** | ❌ **Locked-in** |
+| **Reliability** | ✅ **Tiered Fallbacks** | ❌ **Single Point of Failure** |
+| **Expertise** | ✅ **Reputation-Weighted** | ❌ **Generic** |
+| **Speed/Cost** | ✅ **Speculative Short-circuit** | ❌ **Linear** |
 
 ---
 
-## 🛣️ Roadmap
+## 🛣️ Roadmap: The Future of Decision Layers
 
+We are evolving from a consensus engine into a complete **AI Decision Backbone**.
+
+### 🟢 Phase 1: Foundation (Current)
 - [x] Speculative Tiered Execution
-- [x] Remote Embedding Fallbacks
-- [x] Domain-Aware Adaptive Thresholds
-- [ ] Redis-backed Semantic Cache
-- [ ] Real-time "Deliberation Round" (Models critiquing each other)
-- [ ] Prometheus/Grafana Dashboard
+- [x] Adaptive Domain Thresholds
+- [x] Hybrid Semantic Clustering
+- [x] Guided Interactive Installation
 
----
+### 🟡 Phase 2: Intelligence (Next 3 Months)
+- **Deliberation Round (Multi-Agent Debate)**: If a dispute is detected, models will critique each other's reasoning to reach a deeper truth.
+- **Redis-Backed Semantic Cache**: Instant answers for semantically identical queries across your entire organization.
+- **Prometheus & OpenTelemetry**: Enterprise-grade monitoring for latency, cost, and consensus drift.
 
-## 📄 License
-Quorum is released under the **Apache-2.0 License**. See [LICENSE](LICENSE) for details.
+### 🔴 Phase 3: Autonomous Governance (Next 6-12 Months)
+- **Automatic Council Optimization**: The Router will dynamically reconfigure councils based on real-time model performance.
+- **RAG Memory Layer**: Infuse councils with your private data before they vote.
+- **Decentralized Councils**: Support for multi-node councils across different geographic regions.
 
 ---
 
 ## 🤝 Contributing
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to help improve Quorum.
+
+We are an open-source project and welcome all contributors! Whether it's fixing a bug, adding a new provider adapter, or improving documentation, your help is appreciated.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+---
+
+## 📄 License
+Quorum is released under the **Apache-2.0 License**.
+
+<p align="center">
+  <br>
+  <b>"In a council of many, there is wisdom."</b>
+</p>
