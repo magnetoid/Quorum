@@ -134,7 +134,7 @@ def _norm(a: Sequence[float]) -> float:
     return math.sqrt(sum(float(x) * float(x) for x in a))
 
 
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+def get_cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     denom = _norm(a) * _norm(b)
     if denom <= 0:
         return 0.0
@@ -166,7 +166,7 @@ def _remote_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
         return None
 
 
-def _semantic_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
+def get_semantic_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
     mode = os.getenv("QUORUM_SEMANTIC_VOTING", "auto").lower().strip()
     if mode in {"0", "false", "off", "disabled"}:
         return None
@@ -190,7 +190,7 @@ def _build_similarity_matrix(valid_items: List[tuple[str, str]]) -> tuple[Dict[s
     token_sets = {m: _tokens(t) for m, t in valid_items}
     sims: Dict[str, Dict[str, float]] = {m: {} for m in models}
 
-    embeddings = _semantic_embeddings(texts)
+    embeddings = get_semantic_embeddings(texts)
     semantic_weight = max(0.0, min(1.0, _env_float("QUORUM_SEMANTIC_WEIGHT", 0.7)))
     method = "lexical"
     if embeddings is not None and len(embeddings) == len(models):
@@ -201,7 +201,7 @@ def _build_similarity_matrix(valid_items: List[tuple[str, str]]) -> tuple[Dict[s
             lexical = _jaccard(token_sets[a], token_sets[b])
             if method == "hybrid-semantic":
                 assert embeddings is not None
-                semantic = _cosine(embeddings[i], embeddings[j])
+                semantic = get_cosine_similarity(embeddings[i], embeddings[j])
                 score = semantic_weight * semantic + (1.0 - semantic_weight) * lexical
                 # Preserve the existing negation safety: if one answer is negated
                 # and the other is not, do not let embeddings alone create a false

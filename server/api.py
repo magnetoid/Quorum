@@ -15,14 +15,16 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, AsyncGenerator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from config import load_config
 from core.engine import Engine
@@ -213,20 +215,19 @@ def _chat_sse_event(payload: Dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-async def _stream_chat_response(req: ChatCompletionRequest, result: Dict[str, Any]):
-    """OpenAI-compatible SSE stream.
-
-    This currently streams the completed consensus in one delta. It gives OpenAI
-    clients a compatible streaming transport while true token-level provider
-    streaming is added underneath later.
-    """
+async def _stream_chat_response(
+    req: ChatCompletionRequest,
+    gen: AsyncGenerator[Dict[str, Any], None],
+    prompt: str,
+    domain: str,
+):
+    """OpenAI-compatible SSE stream with incremental consensus updates."""
     created = int(time.time())
-    chunk_id = f"chatcmpl-{result['query_id']}"
-    content = result.get("consensus", "")
+    last_result: Optional[Dict[str, Any]] = None
 
     yield _chat_sse_event(
         {
-            "id": chunk_id,
+            "id": "pending",
             "object": "chat.completion.chunk",
             "created": created,
             "model": req.model,
@@ -235,27 +236,51 @@ async def _stream_chat_response(req: ChatCompletionRequest, result: Dict[str, An
             ],
         }
     )
+
+    async for result in gen:
+        last_result = result
+        chunk_id = f"chatcmpl-{result.get('query_id', 'stream')}"
+        content = result.get("consensus", "")
+        
+        # In a real token-stream, we'd only send the delta. 
+        # For consensus-stream, we send the whole current best guess as one delta
+        # OR we can clear and send again if the client supports it.
+        # OpenAI spec usually expects deltas. 
+        # Here we'll just send the current best guess.
+        
+        yield _chat_sse_event(
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [
+                    {"index": 0, "delta": {"content": content}, "finish_reason": None}
+                ],
+                "quorum": {
+                    "confidence": result.get("confidence", 0.0),
+                    "disputed_flag": result.get("disputed_flag", False),
+                    "domain": result.get("domain"),
+                    "query_id": result.get("query_id"),
+                    "cost": result.get("cost", "$0.0000"),
+                },
+            }
+        )
+
+    if last_result:
+        # Save final result to history
+        await db.save_history(
+            query_id=last_result.get("query_id", str(uuid.uuid4())),
+            prompt=prompt,
+            domain=domain,
+            consensus=last_result["consensus"],
+            disputed_flag=last_result.get("disputed_flag", False),
+            cost=last_result.get("cost", "$0.0000"),
+        )
+
     yield _chat_sse_event(
         {
-            "id": chunk_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": req.model,
-            "choices": [
-                {"index": 0, "delta": {"content": content}, "finish_reason": None}
-            ],
-            "quorum": {
-                "confidence": result.get("confidence", 0.0),
-                "disputed_flag": result.get("disputed_flag", False),
-                "domain": result.get("domain"),
-                "query_id": result.get("query_id"),
-                "cost": result.get("cost", "$0.0000"),
-            },
-        }
-    )
-    yield _chat_sse_event(
-        {
-            "id": chunk_id,
+            "id": "final",
             "object": "chat.completion.chunk",
             "created": created,
             "model": req.model,
@@ -263,6 +288,11 @@ async def _stream_chat_response(req: ChatCompletionRequest, result: Dict[str, An
         }
     )
     yield "data: [DONE]\n\n"
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ── Liveness + REST ─────────────────────────────────────────────────────────
@@ -319,6 +349,14 @@ async def chat_completions(
     domain, override_models = _parse_model_spec(req.model)
     budget = x_quorum_budget if x_quorum_budget is not None else 0.05
 
+    if req.stream:
+        # 🌊 Incremental Streaming
+        gen = engine.run_stream(prompt=prompt, domain=domain, budget=budget)
+        return StreamingResponse(
+            _stream_chat_response(req, gen, prompt, domain),
+            media_type="text/event-stream",
+        )
+
     try:
         result = await _run_and_save(
             prompt=prompt,
@@ -329,13 +367,7 @@ async def chat_completions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    if req.stream:
-        return StreamingResponse(
-            _stream_chat_response(req, result),
-            media_type="text/event-stream",
-        )
-
-    return _chat_response(req, result)
+    return result
 
 
 # Mount GraphQL and MCP after REST routes so import-time work stays isolated.

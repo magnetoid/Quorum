@@ -343,7 +343,6 @@ def _step_background_service() -> None:
 
     is_mac = os.uname().sysname == "Darwin"
     cwd = os.getcwd()
-    venv_python = f"{cwd}/.venv/bin/python"
     quorum_bin = f"{cwd}/.venv/bin/quorum"
 
     if is_mac:
