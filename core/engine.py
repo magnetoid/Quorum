@@ -103,13 +103,15 @@ class Engine:
         latencies: Dict[str, float],
     ) -> Tuple[Dict[str, Any], float]:
         """Perform a second round where models critique the dissenting opinions."""
-        # Only re-ask the dissenting models. Re-querying the whole council
-        # (including the plurality cluster) roughly doubles spend on every
-        # disputed query and can destabilise an already-reasonable plurality.
+        # Re-ask the whole council (minus hard failures) so both the plurality
+        # and the dissenters get to reconsider in light of the disagreement —
+        # that is the point of a deliberation round. This is already bounded by
+        # the dispute gate, the QUORUM_DELIBERATION flag, and the budget check
+        # in run(), so it does not run unbounded.
         models_to_reask = [
             agent["model"]
             for agent in previous_output["agents"]
-            if agent["vote"] == "dissent"
+            if agent["vote"] != "Error"
         ]
         if not models_to_reask:
             return previous_output, 0.0

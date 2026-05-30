@@ -17,6 +17,15 @@ from typing import Dict, Any
 class GeminiAdapter(BaseAdapter):
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+    # Map friendly shorthand to current Gemini model IDs (mirrors the Anthropic
+    # adapter's model_map). Full/dated IDs (e.g. "gemini-2.5-flash") pass through
+    # unchanged. The bare "gemini-flash"/"gemini-pro" aliases are NOT valid API
+    # model names on their own, so without this they 404.
+    MODEL_MAP = {
+        "gemini-flash": "gemini-2.5-flash",
+        "gemini-pro": "gemini-2.5-pro",
+    }
+
     def __init__(self, config: AppConfig, timeout: float = 60.0):
         self.config = config
         self.api_key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
@@ -27,6 +36,7 @@ class GeminiAdapter(BaseAdapter):
             return AdapterResponse(content="", error="Error: GEMINI_API_KEY (or GOOGLE_API_KEY) not set")
 
         api_model = model[len("gemini/"):] if model.startswith("gemini/") else model
+        api_model = self.MODEL_MAP.get(api_model, api_model)
         # Send the key in an HTTP header (`x-goog-api-key`) rather than in
         # the URL query string, so it doesn't leak into access logs, proxy
         # traces, or browser history. Both forms are supported by the API;
