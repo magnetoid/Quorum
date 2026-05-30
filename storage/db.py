@@ -7,6 +7,9 @@ class DB:
         self.db_path = db_path
 
     async def init_db(self):
+        # journal_mode=WAL is a persistent, file-level property: once set here it
+        # is inherited by every later connection, so the other methods don't need
+        # to re-issue it on each call.
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA synchronous=NORMAL")
@@ -47,7 +50,6 @@ class DB:
 
     async def get_reputation(self, domain: str) -> Dict[str, float]:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             async with db.execute(
                 "SELECT model, score FROM reputation WHERE domain = ?", (domain,)
             ) as cursor:
@@ -55,7 +57,6 @@ class DB:
 
     async def update_reputation(self, model: str, domain: str, delta: float):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             await db.execute(
                 """
                 INSERT INTO reputation (model, domain, score)
@@ -68,7 +69,6 @@ class DB:
 
     async def save_history(self, query_id: str, prompt: str, domain: str, consensus: str, disputed_flag: bool, cost: str):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             await db.execute(
                 """
                 INSERT INTO history (query_id, prompt, domain, consensus, disputed_flag, cost)
@@ -80,7 +80,6 @@ class DB:
 
     async def get_history(self, limit: int = 20) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             async with db.execute(
                 "SELECT query_id, prompt, domain, consensus, disputed_flag, cost "
                 "FROM history ORDER BY rowid DESC LIMIT ?",
@@ -104,7 +103,6 @@ class DB:
         if not deltas:
             return
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             await db.executemany(
                 "INSERT INTO pending_outcomes (query_id, model, domain, delta) VALUES (?, ?, ?, ?)",
                 [(query_id, model, domain, delta) for model, domain, delta in deltas],
@@ -113,7 +111,6 @@ class DB:
 
     async def get_pending_outcomes(self, query_id: str) -> List[Tuple[str, str, float]]:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             async with db.execute(
                 "SELECT model, domain, delta FROM pending_outcomes WHERE query_id = ?",
                 (query_id,),
@@ -122,7 +119,6 @@ class DB:
 
     async def apply_feedback(self, query_id: str, score: float) -> bool:
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             async with db.execute(
                 "SELECT model, domain, delta FROM pending_outcomes WHERE query_id = ?",
                 (query_id,),

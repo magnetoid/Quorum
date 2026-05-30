@@ -36,6 +36,9 @@ semantic = [
     "sentence-transformers>=3.0",
     "numpy>=1.26",
 ]
+cache = [
+    "redis>=5.0",
+]
 
 [project.scripts]
 quorum = "cli.main:app"
