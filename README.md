@@ -104,15 +104,16 @@ We are evolving from a consensus engine into a complete **AI Decision Backbone**
 - [x] Hybrid Semantic Clustering
 - [x] Guided Interactive Installation
 
-### 🟡 Phase 2: Intelligence (Next 3 Months)
-- **Deliberation Round (Multi-Agent Debate)**: If a dispute is detected, models will critique each other's reasoning to reach a deeper truth.
-- **Redis-Backed Semantic Cache**: Instant answers for semantically identical queries across your entire organization.
-- **Prometheus & OpenTelemetry**: Enterprise-grade monitoring for latency, cost, and consensus drift.
+### 🟡 Phase 2: Intelligence (Current)
+- [x] **Deliberation Round (Multi-Agent Debate)**: Models critique each other's reasoning to reach a deeper truth.
+- [x] **Redis-Backed Semantic Cache**: Instant answers for semantically identical queries.
+- [x] **Prometheus & OpenTelemetry**: Enterprise-grade monitoring for latency, cost, and consensus drift.
+- [ ] **Automated Judge Feedback**: Self-supervision using a "Golden Model" to resolve disputes automatically.
 
 ### 🔴 Phase 3: Autonomous Governance (Next 6-12 Months)
-- **Automatic Council Optimization**: The Router will dynamically reconfigure councils based on real-time model performance.
-- **RAG Memory Layer**: Infuse councils with your private data before they vote.
-- **Decentralized Councils**: Support for multi-node councils across different geographic regions.
+- [ ] **Continuous Improvement Algorithm (CIA)**: Self-evolving reputation calibration and council optimization.
+- [ ] **RAG Memory Layer**: Infuse councils with private data before they vote.
+- [ ] **Decentralized Councils**: Support for multi-node councils across different geographic regions.
 
 ---
 

@@ -51,16 +51,15 @@ Reputation is no longer a simple +/- 1.0 delta. It is now weighted by the model'
 
 ---
 
-## 4. Prioritized Roadmap (Next Generation)
+## 4. Prioritized Roadmap (CIA Evolution)
 
-### 🔴 Phase A: Deliberation Round
-**Problem**: Models sometimes disagree due to minor semantic misunderstandings.
-**Fix**: If a `disputed_flag` is raised, send the top 2 dissenting responses back to each council member and ask for a "re-evaluation."
+### ✅ Phase A: Deliberation Round (Resolved)
+- Models now re-evaluate their positions when a dispute is detected, using the top dissenting responses as context.
 
-### 🔴 Phase B: Organizational Semantic Cache
-**Problem**: Large teams often ask the same architectural or legal questions.
-**Fix**: Implement a Redis-backed semantic cache that returns the previous council's consensus if the new prompt is 95%+ semantically identical.
+### ✅ Phase B: Organizational Semantic Cache (Resolved)
+- Redis-backed cache now returns previous consensus results for semantically identical queries.
 
-### 🔴 Phase C: Automated Council Pruning
-**Problem**: Some models might be "dead weight" for specific domains.
-**Fix**: Use the new latency and cost telemetry to automatically remove models that consistently fail to contribute to the winning cluster.
+### 🔴 Phase C: Continuous Improvement Algorithm (CIA)
+- **Automated Judge**: Use a "Golden Model" to provide ground truth for reputation updates without human intervention.
+- **Brier Calibration**: Penalize "confident hallucinations" exponentially using probability calibration scores.
+- **Active Council Pruning**: Automatically remove models that consistently fail to contribute to the winning cluster in specific domains.
