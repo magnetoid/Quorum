@@ -126,6 +126,33 @@ def _semantic_model():
         return None
 
 
+def _normalized_entropy(weights: Sequence[float]) -> float:
+    """Shannon entropy of a cluster-weight distribution, normalized to [0, 1].
+
+    0.0 means all mass sits in one cluster (full agreement); 1.0 means mass is
+    spread evenly across the maximum number of clusters (maximum disagreement).
+
+    This turns the cluster distribution into a dispersion / uncertainty signal.
+    Unlike the single dominant-cluster fraction (`confidence`), entropy
+    distinguishes "one clear majority plus a couple of outliers" from "evenly
+    split many ways" — the cheap, sample-free analogue of the semantic-entropy
+    hallucination signal (Farquhar et al., Nature 2024), computed over clusters
+    Quorum has already formed.
+    """
+    positive = [float(w) for w in weights if w > 0]
+    n = len(positive)
+    if n <= 1:
+        return 0.0
+    total = sum(positive)
+    if total <= 0:
+        return 0.0
+    h = 0.0
+    for w in positive:
+        p = w / total
+        h -= p * math.log(p)
+    return max(0.0, min(1.0, h / math.log(n)))
+
+
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
     return sum(float(x) * float(y) for x, y in zip(a, b))
 
@@ -238,6 +265,7 @@ class VotingEngine:
             return {
                 "consensus": "No responses received",
                 "confidence": 0.0,
+                "entropy": 0.0,
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": [],
@@ -269,6 +297,7 @@ class VotingEngine:
             return {
                 "consensus": "All models failed",
                 "confidence": 0.0,
+                "entropy": 0.0,
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": error_agents,
@@ -286,6 +315,7 @@ class VotingEngine:
             return {
                 "consensus": t,
                 "confidence": 0.5,
+                "entropy": 0.0,
                 "disputed": "",
                 "disputed_flag": False,
                 "agents": [{"model": m, "response": t, "vote": "sole"}] + error_agents,
@@ -329,9 +359,13 @@ class VotingEngine:
                         vote = "dissent"
                     agents_out.append({"model": m, "response": t, "vote": vote})
                 agents_out.extend(error_agents)
+                label_entropy = _normalized_entropy(
+                    [cluster_weight(ms) for ms in label_to_models.values()]
+                )
                 return {
                     "consensus": consensus_text,
                     "confidence": round(label_conf, 3),
+                    "entropy": round(label_entropy, 3),
                     "disputed": disputed,
                     "disputed_flag": disputed_flag,
                     "agents": agents_out,
@@ -413,9 +447,12 @@ class VotingEngine:
             agents_out_v.append({"model": m, "response": t, "vote": vote})
         agents_out_v.extend(error_agents)
 
+        cluster_entropy = _normalized_entropy([cluster_weight(c) for c in clusters])
+
         return {
             "consensus": consensus_text,
             "confidence": round(confidence, 3),
+            "entropy": round(cluster_entropy, 3),
             "disputed": disputed,
             "disputed_flag": disputed_flag,
             "agents": agents_out_v,

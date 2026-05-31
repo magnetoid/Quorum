@@ -18,6 +18,17 @@ from observability import metrics
 logger = logging.getLogger(__name__)
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %.3f", name, raw, default)
+        return default
+
+
 class Engine:
     def __init__(self, config: AppConfig, db: DB):
         self.config = config
@@ -308,7 +319,31 @@ class Engine:
                     output = delib_output
                     total_cost += delib_cost
 
+            # 🤔 Abstention: if the council still can't agree confidently enough,
+            # return an explicit "insufficient consensus" instead of a
+            # disagreement dump. Selective prediction (rejecting the most
+            # uncertain queries) is a documented accuracy win. Disabled by
+            # default (threshold 0.0); enable via QUORUM_ABSTAIN_CONFIDENCE or
+            # voting.abstain_confidence in config.
+            output["abstained"] = False
+            abstain_threshold = _env_float(
+                "QUORUM_ABSTAIN_CONFIDENCE", self.config.voting.abstain_confidence
+            )
+            if (
+                output.get("disputed_flag")
+                and abstain_threshold > 0.0
+                and output.get("confidence", 0.0) < abstain_threshold
+            ):
+                output["abstained"] = True
+                output["consensus"] = (
+                    "Insufficient consensus: the council did not agree confidently "
+                    "enough to give a single answer. See the disputed responses for "
+                    "the range of views."
+                )
+                metrics.ABSTENTIONS_TOTAL.labels(domain=domain).inc()
+
             metrics.CONSENSUS_CONFIDENCE.observe(output.get("confidence", 0.0))
+            metrics.CONSENSUS_ENTROPY.observe(output.get("entropy", 0.0))
 
         finally:
             metrics.ACTIVE_REQUESTS.dec()
