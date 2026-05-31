@@ -7,12 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple, AsyncGenerator
 
 from config import AppConfig
 from core.router import Router
-from core.voting import VotingEngine, get_semantic_embeddings
+from core.voting import VotingEngine
 from adapters import build_adapter, provider_for_model
 from adapters.base import AdapterResponse, BaseAdapter
 
 from storage.db import DB
-from storage.cache import SemanticCache
+from storage.cache import PromptCache
 from observability import metrics
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,13 @@ class Engine:
         self.config = config
         self.db = db
         self.router = Router(config)
-        self.voting = VotingEngine()
-        self.cache = SemanticCache()
+        # Wire the configured voting thresholds through instead of silently
+        # falling back to VotingEngine's hardcoded defaults.
+        self.voting = VotingEngine(
+            cluster_threshold=config.voting.cluster_threshold,
+            dispute_confidence=config.voting.dispute_confidence,
+        )
+        self.cache = PromptCache()
         # Adapters are built lazily on first use so importing the engine doesn't
         # require every provider's SDK / key to be present.
         self.adapters: Dict[str, BaseAdapter] = {}
@@ -98,7 +103,16 @@ class Engine:
         latencies: Dict[str, float],
     ) -> Tuple[Dict[str, Any], float]:
         """Perform a second round where models critique the dissenting opinions."""
-        models_to_reask = [agent["model"] for agent in previous_output["agents"] if agent["vote"] != "Error"]
+        # Re-ask the whole council (minus hard failures) so both the plurality
+        # and the dissenters get to reconsider in light of the disagreement —
+        # that is the point of a deliberation round. This is already bounded by
+        # the dispute gate, the QUORUM_DELIBERATION flag, and the budget check
+        # in run(), so it does not run unbounded.
+        models_to_reask = [
+            agent["model"]
+            for agent in previous_output["agents"]
+            if agent["vote"] != "Error"
+        ]
         if not models_to_reask:
             return previous_output, 0.0
 
@@ -159,13 +173,19 @@ class Engine:
             if not tier_models:
                 continue
 
+            # Budget gate: never launch a new (pricier) tier once the budget is
+            # already spent. The first tier always runs so we return an answer.
+            if total_cost >= budget and all_responses:
+                break
+
             task = asyncio.create_task(self._ask_models(tier_models, system_prompt, prompt))
             running_tasks.append(task)
 
-            try:
-                await asyncio.wait(running_tasks, timeout=stagger_timeout, return_when=asyncio.FIRST_COMPLETED)
-            except asyncio.TimeoutError:
-                pass
+            # asyncio.wait() returns (done, pending) when the timeout elapses —
+            # it does NOT raise TimeoutError — so no except clause is needed.
+            await asyncio.wait(
+                running_tasks, timeout=stagger_timeout, return_when=asyncio.FIRST_COMPLETED
+            )
 
             # Harvest completed tasks
             for t in running_tasks[:]:
@@ -193,9 +213,6 @@ class Engine:
                 if output["confidence"] >= tier_config.confidence_threshold:
                     break
 
-            if total_cost >= budget:
-                break
-        
         # Final harvest
         if running_tasks:
             results_list = await asyncio.gather(*running_tasks)
@@ -234,10 +251,10 @@ class Engine:
         metrics.ACTIVE_REQUESTS.inc()
 
         try:
-            # ⚡ Cache Check
-            embeddings = get_semantic_embeddings([prompt])
-            prompt_vector = embeddings[0] if embeddings else []
-            cached_result = self.cache.get(prompt, domain, prompt_vector)
+            # ⚡ Cache check — exact match on a stable hash of (domain, prompt).
+            # (Previously this computed a throwaway embedding on every request,
+            # which the cache never used; voting computes its own embeddings.)
+            cached_result = self.cache.get(prompt, domain)
             if cached_result:
                 metrics.CACHE_HITS_TOTAL.inc()
                 cached_result["query_id"] = query_id
@@ -299,11 +316,30 @@ class Engine:
             metrics.REQUEST_DURATION.labels(domain=domain).observe(duration)
 
         # Add metadata.
-
         output["domain"] = domain
         output["query_id"] = query_id
         output["cost"] = f"${total_cost:.4f}"
 
+        # Attach telemetry, persist cache + tentative reputation deltas.
+        await self._finalize_outcome(query_id, domain, prompt, output, all_responses, latencies)
+
+        return output
+
+    async def _finalize_outcome(
+        self,
+        query_id: str,
+        domain: str,
+        prompt: str,
+        output: Dict[str, Any],
+        all_responses: Dict[str, AdapterResponse],
+        latencies: Dict[str, float],
+    ) -> None:
+        """Attach per-agent telemetry, then either record the dispute metric or
+        persist the cache entry + tentative reputation deltas.
+
+        Shared by run() and run_stream() so streamed queries also populate the
+        cache and contribute to the reputation feedback loop.
+        """
         # Attach token + cost + latency telemetry.
         for agent in output.get("agents", []):
             model = agent["model"]
@@ -317,44 +353,40 @@ class Engine:
                     agent["response"] = resp.error
                     agent["vote"] = "Error"
 
-        # Record tentative reputation deltas for the feedback loop.
-        # Non-linear learning: premium models are weighted more heavily.
         if output.get("disputed_flag"):
             metrics.DISPUTED_TOTAL.labels(domain=domain).inc()
-        else:
-            # ⚡ Store in cache
-            self.cache.set(prompt, domain, prompt_vector, output)
-            
-            deltas = []
-            for agent in output.get("agents", []):
-                vote = agent.get("vote", "")
-                model = agent["model"]
-                
-                # Weight delta by tier: premium=2.0, cheap=1.0, local=0.5
-                weight = 1.0
-                premium_tier = self.config.tiers.get("premium")
-                local_tier = self.config.tiers.get("local")
-                if premium_tier and model in premium_tier.models:
-                    weight = 2.0
-                elif local_tier and model in local_tier.models:
-                    weight = 0.5
+            return
 
-                if vote in ("anchor", "consensus"):
-                    deltas.append((model, domain, 1.0 * weight))
-                elif vote == "dissent":
-                    deltas.append((model, domain, -1.0 * weight))
-            if deltas:
-                try:
-                    await self.db.save_pending_outcomes(query_id, deltas)
-                except Exception as e:
-                    logger.warning(
-                        "save_pending_outcomes failed for query %s: %s: %s",
-                        query_id,
-                        type(e).__name__,
-                        e,
-                    )
+        # Not disputed: cache the result and record tentative reputation deltas.
+        # Non-linear learning: premium models are weighted more heavily.
+        self.cache.set(prompt, domain, output)
 
-        return output
+        premium_tier = self.config.tiers.get("premium")
+        local_tier = self.config.tiers.get("local")
+        deltas = []
+        for agent in output.get("agents", []):
+            vote = agent.get("vote", "")
+            model = agent["model"]
+            # Weight delta by tier: premium=2.0, cheap=1.0, local=0.5
+            weight = 1.0
+            if premium_tier and model in premium_tier.models:
+                weight = 2.0
+            elif local_tier and model in local_tier.models:
+                weight = 0.5
+            if vote in ("anchor", "consensus"):
+                deltas.append((model, domain, 1.0 * weight))
+            elif vote == "dissent":
+                deltas.append((model, domain, -1.0 * weight))
+        if deltas:
+            try:
+                await self.db.save_pending_outcomes(query_id, deltas)
+            except Exception as e:
+                logger.warning(
+                    "save_pending_outcomes failed for query %s: %s: %s",
+                    query_id,
+                    type(e).__name__,
+                    e,
+                )
 
     async def run_stream(
         self,
@@ -362,16 +394,39 @@ class Engine:
         domain: str = "default",
         budget: float = 0.05,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Stream intermediate consensus results."""
+        """Stream intermediate consensus results.
+
+        The final (non-disputed) result is also cached and contributes tentative
+        reputation deltas, mirroring run() — so streamed queries are not excluded
+        from the learning loop.
+        """
         if domain == "default":
             domain = self.router.classify_domain(prompt)
 
         system_prompt = self.config.personas.get(domain, self.config.personas.get("default", ""))
+        query_id = str(uuid.uuid4())
+
+        final_output: Optional[Dict[str, Any]] = None
+        final_responses: Dict[str, AdapterResponse] = {}
+        final_latencies: Dict[str, float] = {}
 
         async for output in self._execute_tiers(prompt, domain, system_prompt, budget):
-            # Clean up internal fields for streaming
-            output.pop("all_responses", None)
-            output.pop("latencies", None)
-            output.pop("total_cost", None)
-            output["domain"] = domain
-            yield output
+            final_responses = output.get("all_responses", {})
+            final_latencies = output.get("latencies", {})
+            total_cost = output.get("total_cost", 0.0)
+            # Strip internal fields and emit a clean streaming chunk.
+            streamed = {
+                k: v
+                for k, v in output.items()
+                if k not in ("all_responses", "latencies", "total_cost")
+            }
+            streamed["domain"] = domain
+            streamed["query_id"] = query_id
+            streamed["cost"] = f"${total_cost:.4f}"
+            final_output = streamed
+            yield streamed
+
+        if final_output is not None:
+            await self._finalize_outcome(
+                query_id, domain, prompt, final_output, final_responses, final_latencies
+            )

@@ -16,29 +16,41 @@ tiers:
     confidence_threshold: 0.95
 budget:
   default_per_query: 0.05
+# Each domain's allow-list must use the SAME model names as the tiers above:
+# the engine runs a model only if it appears in BOTH the domain list and a tier
+# (tier ∩ domain). Every domain therefore spans multiple tiers and includes the
+# two free local models so a real council convenes even with no API keys.
 domains:
   code:
   - ollama/qwen2.5-coder
-  - claude-sonnet
-  - gpt-4o
-  finance:
-  - claude-opus
-  - o3
-  - gemini-pro
-  architecture:
-  - claude-sonnet
-  - gpt-4o
   - ollama/llama3.2
-  legal:
-  - claude-opus
-  - gpt-4o
-  creative:
-  - claude-sonnet
   - gpt-4o-mini
+  - claude-opus-4
+  finance:
   - ollama/llama3.2
+  - gpt-4o-mini
+  - claude-opus-4
+  - o3
+  architecture:
+  - ollama/llama3.2
+  - ollama/qwen2.5-coder
+  - gpt-4o-mini
+  - claude-opus-4
+  legal:
+  - ollama/llama3.2
+  - gpt-4o-mini
+  - claude-opus-4
+  - o3
+  creative:
+  - ollama/llama3.2
+  - ollama/qwen2.5-coder
+  - gemini-flash
+  - claude-opus-4
   factual:
   - ollama/llama3.2
+  - ollama/qwen2.5-coder
   - gemini-flash
+  - gpt-4o-mini
 personas:
   code: You are a senior software engineer. Prefer concise, correct code with minimal
     commentary.
@@ -48,6 +60,9 @@ personas:
   creative: You are a strong creative writer. Be vivid and original.
   factual: You are a precise fact-checker. Cite sources where possible and flag uncertainty.
   default: You are a careful expert. Be precise and flag uncertainty.
+# Pricing keys must match the model names used in tiers/domains exactly; an
+# unmatched name silently costs $0 (the adapter falls back to 0.0). These are
+# the names actually referenced above.
 pricing:
   ollama/llama3.2:
     input: 0.0
@@ -58,27 +73,15 @@ pricing:
   gemini-flash:
     input: 0.00035
     output: 0.00105
-  gemini-pro:
-    input: 0.00125
-    output: 0.005
   gpt-4o-mini:
     input: 0.00015
     output: 0.0006
-  gpt-4o:
-    input: 0.005
-    output: 0.015
-  o3:
-    input: 0.015
-    output: 0.06
-  claude-sonnet:
-    input: 0.003
-    output: 0.015
-  claude-opus:
-    input: 0.015
-    output: 0.075
   claude-opus-4:
     input: 0.015
     output: 0.075
+  o3:
+    input: 0.015
+    output: 0.06
 voting:
   cluster_threshold: 0.25
   dispute_confidence: 0.66
