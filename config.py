@@ -34,6 +34,11 @@ class ProviderConfig(BaseModel):
 class VotingConfig(BaseModel):
     cluster_threshold: float = 0.25
     dispute_confidence: float = 0.66
+    # Selective prediction: if a result is still disputed AND its confidence is
+    # below this threshold, the engine abstains ("insufficient consensus")
+    # instead of returning a disagreement dump. 0.0 disables abstention (the
+    # default). Override per-deployment or via QUORUM_ABSTAIN_CONFIDENCE.
+    abstain_confidence: float = 0.0
 
 
 class AppConfig(BaseModel):

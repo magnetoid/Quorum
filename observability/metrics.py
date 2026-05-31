@@ -44,6 +44,18 @@ CONSENSUS_CONFIDENCE = Histogram(
     buckets=(0.0, 0.25, 0.5, 0.66, 0.75, 0.9, 1.0),
 )
 
+CONSENSUS_ENTROPY = Histogram(
+    "quorum_consensus_entropy",
+    "Normalized entropy of the cluster distribution (0=agreement, 1=max disagreement)",
+    buckets=(0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0),
+)
+
+ABSTENTIONS_TOTAL = Counter(
+    "quorum_abstentions_total",
+    "Total queries where the engine abstained for insufficient consensus",
+    ["domain"],
+)
+
 DISPUTED_TOTAL = Counter(
     "quorum_disputed_total",
     "Total disputed Quorum results",

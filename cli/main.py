@@ -60,9 +60,15 @@ def ask(
         
         # Display output
         console.print(f"\n[bold blue]Domain:[/bold blue] {result['domain']}")
-        console.print(f"[bold blue]Confidence:[/bold blue] {result['confidence']:.2f}")
+        console.print(
+            f"[bold blue]Confidence:[/bold blue] {result['confidence']:.2f}"
+            f"  [dim]Disagreement (entropy): {result.get('entropy', 0.0):.2f}[/dim]"
+        )
         console.print(f"[bold blue]Cost:[/bold blue] {result['cost']}")
-        
+
+        if result.get("abstained"):
+            console.print("[yellow]⚖ Abstained — insufficient consensus to answer.[/yellow]")
+
         if result["disputed_flag"]:
             console.print(Panel(result["disputed"], title="[red]Disputed Zone[/red]", expand=False, border_style="red"))
         
